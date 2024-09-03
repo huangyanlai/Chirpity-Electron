@@ -95,7 +95,7 @@ let NUM_WORKERS;
 let workerInstance = 0;
 let appPath, BATCH_SIZE, LABELS, batchChunksToSend = {};
 let LIST_WORKER;
-const DEBUG = false;
+const DEBUG = true;
 
 const DATASET = false;
 const adding_chirpity_additions = true;
@@ -121,7 +121,21 @@ let diskDB, memoryDB;
 let t0; // Application profiler
 
 
+function parseCname(cname){
+    let callType = 0; // Default to zero
 
+    if (cname.endsWith(' (call)')) {
+        callType = 1;
+        cname = cname.slice(0, -7); // Remove the last 7 characters (length of ' (call)')
+    } else if (cname.endsWith(' (flight call)')) {
+        callType = 2;
+        cname = cname.slice(0, -14); // Remove the last 14 characters (length of ' (flight call)')
+    } else if (cname.endsWith(' (song)')) {
+        callType = 3;
+        cname = cname.slice(0, -7); // Remove the last 7 characters (length of ' (song)')
+    }
+    return [cname, callType];
+}
 
 const getSelectionRange = (file, start, end) => {
     return { start: (start * 1000) + metadata[file].fileStart, end: (end * 1000) + metadata[file].fileStart }
@@ -138,7 +152,9 @@ const createDB = async (file) => {
     }
     const db = archiveMode ? diskDB : memoryDB;
     await db.runAsync('BEGIN');
-    await db.runAsync('CREATE TABLE species(id INTEGER PRIMARY KEY, sname TEXT NOT NULL, cname TEXT NOT NULL)');
+    await db.runAsync('CREATE TABLE calls (id INTEGER PRIMARY KEY, callType TEXT)');
+    await db.runAsync('INSERT INTO calls VALUES (0, NULL), (1, "call"), (2, "flight call"), (3, "song")');
+    await db.runAsync('CREATE TABLE species(id INTEGER PRIMARY KEY, sname TEXT NOT NULL, cname TEXT NOT NULL, call_id INTEGER, UNIQUE (sname, call_id), CONSTRAINT fk_calltype FOREIGN KEY (call_id) REFERENCES calls(id))');
     await db.runAsync(`CREATE TABLE files(id INTEGER PRIMARY KEY, name TEXT,duration  REAL,filestart INTEGER, locationID INTEGER, UNIQUE (name))`);
     await db.runAsync(`CREATE TABLE locations( id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon  REAL NOT NULL, place TEXT NOT NULL, UNIQUE (lat, lon))`);
     // Ensure place names are unique too
@@ -146,79 +162,17 @@ const createDB = async (file) => {
     await db.runAsync(`CREATE TABLE records( dateTime INTEGER, position INTEGER, fileID INTEGER, speciesID INTEGER, confidence INTEGER, label  TEXT,  comment  TEXT, end INTEGER, callCount INTEGER, isDaylight INTEGER, UNIQUE (dateTime, fileID, speciesID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE,  FOREIGN KEY (speciesID) REFERENCES species(id))`);
     await db.runAsync(`CREATE TABLE duration( day INTEGER, duration INTEGER, fileID INTEGER, UNIQUE (day, fileID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE)`);
 
-    if (archiveMode) {
-        for (let i = 0; i < LABELS.length; i++) {
-            const [sname, cname] = LABELS[i].replaceAll("'", "''").split('_');
-            await db.runAsync(`INSERT INTO species VALUES (${i}, '${sname}', '${cname}')`);
-        }
-    } else {
-        const filename = diskDB.filename;
-        let { code } = await db.runAsync(`ATTACH '${filename}' as disk`);
-        // If the db is not ready
-        while (code === "SQLITE_BUSY") {
-            console.log("Disk DB busy")
-            setTimeout(() => {}, 10);
-            let response = await db.runAsync(`ATTACH '${filename}' as disk`);
-            code = response.code;
-        }
-        let response = await db.runAsync('INSERT INTO files SELECT * FROM disk.files');
-        DEBUG && console.log(response.changes + ' files added to memory database')
-        response = await db.runAsync('INSERT INTO locations SELECT * FROM disk.locations');
-        DEBUG && console.log(response.changes + ' locations added to memory database')
-        response = await db.runAsync('INSERT INTO species SELECT * FROM disk.species');
-        DEBUG && console.log(response.changes + ' species added to memory database')
+    for (const label of LABELS) {
+        const [sname, cname] = label.replaceAll("'", "''").split('_');
+        const [common, callType] = parseCname(cname);
+        await db.runAsync(`INSERT OR IGNORE INTO species VALUES (null, '${sname}', '${common}', ${callType})`);
+        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (null, '${sname}', '${common}', ${callType})`)
     }
+
     await db.runAsync('END');
     return db
 }
 
-
-async function runMigration(path, num_labels){
-    const dataset_file_path = p.join(path, `archive_dataset${num_labels}.sqlite`);
-    const archive_file_path = p.join(path, `archive${num_labels}.sqlite`);
-    //back-up the archive database
-    fs.copyFileSync(archive_file_path, archive_file_path + '.bak');
-    // Connect to the databases
-    let datasetDB = new sqlite3.Database(dataset_file_path);
-    const archiveDB = new sqlite3.Database(archive_file_path);
-
-    // Get a list of tables in the source database
-    const tables = await datasetDB.allAsync("SELECT name FROM sqlite_master WHERE type='table'").catch(err => console.log(err));
-    await archiveDB.runAsync('BEGIN');
-    // Loop through each table
-    for (const table of tables)  {
-        const tableName = table.name;
-        if (tableName === 'species') continue; // Species are the same
-        // Query the data from the current table
-        const rows = await datasetDB.allAsync(`SELECT * FROM ${tableName}`).catch(err => console.log(err));
-        // Insert the data into the destination database
-        for (const row of rows) {
-            const columns = Object.keys(row);
-            const values = columns.map(col => row[col]);
-            const placeholders = columns.map(() => '?').join(',');
-
-            await archiveDB.runAsync(`INSERT OR IGNORE INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`, ...values)
-                .catch(err => console.log(err));
-        };
-    }
-    await archiveDB.runAsync('END');
-    // Close the database connections
-    datasetDB.close(function (err){
-        //back-up (rename) the dataset database file
-        fs.rename(dataset_file_path, dataset_file_path + '.bak', function (err) {
-            if (err){
-                console.log(err)
-            } else {
-                console.log('Backup successful');
-            }
-        });
-    });
-    archiveDB.close((err) => {
-        if (err) {
-            console.error(err.message);
-        }
-    });
-}
 
 async function loadDB(path) {
     // We need to get the default labels from the config file
@@ -243,20 +197,11 @@ async function loadDB(path) {
     modelLabels.push("Unknown Sp._Unknown Sp.");
     const num_labels = modelLabels.length;
     LABELS = modelLabels; // these are the default english labels
-    const file = dataset_database ? p.join(path, `archive_dataset${num_labels}.sqlite`) : p.join(path, `archive${num_labels}.sqlite`)
-    // Migrate records from 1.6.8 if archive_dataset exists
-    if (fs.existsSync(p.join(path, `archive_dataset${num_labels}.sqlite`) )){
-        if (!fs.existsSync(p.join(path, `archive${num_labels}.sqlite`)) ){
-            // there was only an archive_dataset database, so just rename it...
-            fs.renameSync(p.join(path, `archive_dataset${num_labels}.sqlite`), p.join(path, `archive${num_labels}.sqlite`))
-        } else {
-            // copy data from dataset database to archive database
-            await runMigration(path, num_labels)
-        }
-    }
+    const file = dataset_database ? p.join(path, `archive_dataset${num_labels}.sqlite`) : p.join(path, `archive.sqlite`)
+    
     if (!fs.existsSync(file)) {
         await createDB(file);
-    } else if (diskDB?.filename !== file) {
+    } else {
         diskDB = new sqlite3.Database(file);
         STATE.update({ db: diskDB });
         await diskDB.runAsync('VACUUM');
@@ -267,16 +212,10 @@ async function loadDB(path) {
         }
         // Get the labels from the DB. These will be in preferred locale
         DEBUG && console.log("Getting labels from disk db " + path)
-        const res = await diskDB.allAsync("SELECT sname || '_' || cname AS labels FROM species ORDER BY id")
-        LABELS = res.map(obj => obj.labels); // these are the labels in the preferred locale
-        const sql = 'PRAGMA table_info(records)';
-        const result = await  diskDB.allAsync(sql);
-        // Update legacy tables
-        const columnExists = result.some((column) => column.name === 'isDaylight');
-        if (!columnExists) {
-            await diskDB.runAsync('ALTER TABLE records ADD COLUMN isDaylight INTEGER')
-            console.log('Added isDaylight column to records table')
-        }
+        //const res = await diskDB.allAsync("SELECT sname || '_' || cname AS labels, calls.callType FROM species JOIN calls ON species.call_id = calls.id ORDER BY species.id")
+        
+        //LABELS = res.map(obj => `${obj.labels} (${obj.callType})`); // these are the labels in the preferred locale
+
         DEBUG && console.log("Opened and cleaned disk db " + file)
     }
     UI.postMessage({event: 'labels', labels: LABELS})
@@ -644,7 +583,7 @@ const prepSummaryStatement = (included) => {
         RANK() OVER (PARTITION BY fileID, dateTime ORDER BY records.confidence DESC) AS rank
         FROM records
         JOIN files ON files.id = records.fileID
-        JOIN species ON species.id = records.speciesID
+        JOIN species ON species.id  = records.speciesID
         WHERE confidence >=  ? `;
     // If you're using the memory db, you're either anlaysing one,  or all of the files
     if (['analyse'].includes(STATE.mode) && STATE.filesToAnalyse.length === 1) {
@@ -2098,7 +2037,7 @@ const generateInsertQuery = async (latestResult, file) => {
         for (let j = 0; j < confidenceArray.length; j++) {
             const confidence = Math.round(confidenceArray[j] * 1000);
             if (confidence < 50) break;
-            const speciesID = speciesIDArray[j];
+            const speciesID = speciesIDArray[j] + 1;
             insertQuery += `(${timestamp}, ${key}, ${fileID}, ${speciesID}, ${confidence}, null, null, ${key + 3}, null, ${isDaylight}), `;
         }
     }
@@ -2143,13 +2082,15 @@ const parsePredictions = async (response) => {
                     confidenceRequired = STATE.detect.confidence;
                 }
                 if (confidence >= confidenceRequired) {
-                    const { cname, sname } = await memoryDB.getAsync(`SELECT cname, sname FROM species WHERE id = ${speciesID}`).catch(error => console.warn('Error getting species name', error));
+                    const record = await memoryDB.getAsync(`SELECT cname, sname, callType FROM species JOIN calls ON species.call_id = calls.id WHERE species.id = ${speciesID + 1}`).catch(error => console.warn('Error getting species name', error));
+                    const { cname, sname, callType } = record;
+                    let common = callType ? `${cname} (${callType})` : cname;
                     const result = {
                         timestamp: timestamp,
                         position: key,
                         end: end,
                         file: file,
-                        cname: cname,
+                        cname: common,
                         sname: sname,
                         score: confidence
                     }
