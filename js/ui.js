@@ -1901,8 +1901,8 @@ const getActiveRowID = () => activeRow?.rowIndex - 1;
 
 const isSpeciesViewFiltered = (sendSpecies) => {
     const filtered = document.querySelector('#speciesFilter tr.text-warning');
-    const species = filtered ? getSpecies(filtered) : undefined;
-    return sendSpecies ? species : filtered !== null;
+    const [species, callType] = filtered ? getSpecies(filtered) : [undefined, ];
+    return sendSpecies ? callType ? `${species} (${callType})` : species : filtered !== null;
 }
 
 
@@ -1919,8 +1919,11 @@ function unpackNameAttr(el, cname) {
 function getSpecies(target) {
     const row = target.closest('tr');
     const speciesCell = row.querySelector('.cname .cname');
-    const species = speciesCell.textContent.split('\n')[0];
-    return species;
+    let species = speciesCell.textContent.split('\n')[0];
+    const match = species.match(/^(.*?)(?:\s*\((.*?)\))?$/);
+    species = match[1].trim();  // Text before the brackets
+    const callType = match[2] || null;     // Text inside the brackets, or null if no brackets
+    return [species, callType];
 }
 
 
@@ -3152,7 +3155,7 @@ function onChartData(args) {
     function speciesFilter(e) {
         if (PREDICTING || ['TBODY', 'TH', 'DIV'].includes(e.target.tagName)) return; // on Drag or clicked header
         clearActive();
-        let species, range;
+        let species, callType, range;
         // Am I trying to unfilter?
         if (e.target.closest('tr').classList.contains('text-warning')) {
             e.target.closest('tr').classList.remove('text-warning');
@@ -3163,12 +3166,12 @@ function onChartData(args) {
             // Add a highlight to the current row
             e.target.closest('tr').classList.add('text-warning');
             // Clicked on unfiltered species
-            species = getSpecies(e.target)
+            [species, callType] = getSpecies(e.target)
         }
         if (isExplore()) {
             range = STATE.explore.range;
             const list = document.getElementById('bird-list-seen');
-            list.value = species || '';
+            list.value = species ? `${species} (${callType})` : '';
         }
         filterResults()
         resetResults({clearSummary: false, clearPagination: false, clearResults: false});
@@ -3372,12 +3375,15 @@ function onChartData(args) {
         callCount = callCount.replace('Present', '');
         DELETE_HISTORY.push([species, start, end, comment, callCount, label, undefined, undefined, undefined, confidence])
         
+        const [spp, callType] = getSpecies(target);
+
         worker.postMessage({
             action: 'delete',
             file: file,
             start: start,
             end: end,
-            species: getSpecies(target),
+            species: spp,
+            callType: callType,
             speciesFiltered: isSpeciesViewFiltered()
         })
         // Clear the record in the UI
@@ -3388,9 +3394,11 @@ function onChartData(args) {
     }
     
     const deleteSpecies = (target) => {
+        let [species, callType] = getSpecies(target);
         worker.postMessage({
             action: 'delete-species',
-            species: getSpecies(target),
+            species: species,
+            callType: callType,
             speciesFiltered: isSpeciesViewFiltered()
         })
         // Clear the record in the UI

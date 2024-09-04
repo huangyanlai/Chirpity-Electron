@@ -3004,13 +3004,18 @@ const onUpdateFileStart = async (args) => {
 
 
 const prepSQL = (string) => string.replaceAll("''", "'").replaceAll("'", "''");
-
+async function getCallID (callType) {
+    const db = STATE.db;
+    const res = callType ? await db.getAsync('SELECT id FROM calls WHERE callType = ?', callType) : {id: 0};
+    return res.id
+}
 
 async function onDelete({
     file,
     start,
     end,
     species,
+    callType,
     active,
     // need speciesfiltered because species triggers getSummary to highlight it
     speciesFiltered
@@ -3022,8 +3027,9 @@ async function onDelete({
     const params = [id, datetime, end];
     let sql = 'DELETE FROM records WHERE fileID = ? AND datetime = ? AND end = ?';
     if (species) {
-        sql += ' AND speciesID = (SELECT id FROM species WHERE cname = ?)'
-        params.push(species);
+        sql += ' AND speciesID = (SELECT id FROM species WHERE cname = ? AND call_id = ?)'
+        const callID = await getCallID(callType)
+        params.push(species, callID);
     }
     // let test = await db.allAsync('SELECT * from records WHERE speciesID = (SELECT id FROM species WHERE cname = ?)', species)
     // console.log('After insert: ',JSON.stringify(test));
@@ -3047,13 +3053,14 @@ async function onDelete({
 
 async function onDeleteSpecies({
     species,
+    callType,
     // need speciesfiltered because species triggers getSummary to highlight it
     speciesFiltered
 }) {
     const db = STATE.db;
-    const params = [species];
-    let SQL = `DELETE FROM records 
-    WHERE speciesID = (SELECT id FROM species WHERE cname = ?)`;
+    const callID = await getCallID(callType)
+    const params = [species, callID];
+    let SQL = `DELETE FROM records WHERE speciesID = (SELECT id FROM species WHERE cname = ? AND call_id = ?)`;
     if (STATE.mode === 'analyse') {
         const rows = await db.allAsync(`SELECT id FROM files WHERE NAME IN (${prepParams(STATE.filesToAnalyse)})`, ...STATE.filesToAnalyse);
         const ids = rows.map(row => row.id).join(',');
