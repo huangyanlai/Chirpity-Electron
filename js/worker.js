@@ -161,22 +161,25 @@ const createDB = async (file) => {
     await db.runAsync('CREATE UNIQUE INDEX idx_unique_place ON locations(lat, lon)');
     await db.runAsync(`CREATE TABLE records( dateTime INTEGER, position INTEGER, fileID INTEGER, speciesID INTEGER, confidence INTEGER, label  TEXT,  comment  TEXT, end INTEGER, callCount INTEGER, isDaylight INTEGER, UNIQUE (dateTime, fileID, speciesID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE,  FOREIGN KEY (speciesID) REFERENCES species(id))`);
     await db.runAsync(`CREATE TABLE duration( day INTEGER, duration INTEGER, fileID INTEGER, UNIQUE (day, fileID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE)`);
+    
+    await getLabelsFromConfig();
 
-    for (const label of LABELS) {
-        const [sname, cname] = label.replaceAll("'", "''").split('_');
+    for (const index in LABELS) {
+        const [sname, cname] = LABELS[index].replaceAll("'", "''").split('_');
         const [common, callType] = parseCname(cname);
-        await db.runAsync(`INSERT OR IGNORE INTO species VALUES (null, '${sname}', '${common}', ${callType})`);
-        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (null, '${sname}', '${common}', ${callType})`)
+        // We do this to ensure the index starts with 0
+        await db.runAsync(`INSERT OR IGNORE INTO species VALUES (${index}, '${sname}', '${common}', ${callType})`);
+        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, '${sname}', '${common}', ${callType})`)
     }
+    archiveMode || await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
 
     await db.runAsync('END');
     return db
 }
 
-
-async function loadDB(path) {
+async function getLabelsFromConfig(){
     // We need to get the default labels from the config file
-    DEBUG && console.log("Loading db " + path)
+    DEBUG && console.log("Loading labels")
     let modelLabels;
     if (STATE.model === 'birdnet'){
         const labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_Labels_en.txt`; 
@@ -195,8 +198,10 @@ async function loadDB(path) {
     
     // Add Unknown Sp.
     modelLabels.push("Unknown Sp._Unknown Sp.");
-    const num_labels = modelLabels.length;
     LABELS = modelLabels; // these are the default english labels
+}
+async function loadDB(path) {
+
     const file = dataset_database ? p.join(path, `archive_dataset${num_labels}.sqlite`) : p.join(path, `archive.sqlite`)
     
     if (!fs.existsSync(file)) {
@@ -212,9 +217,11 @@ async function loadDB(path) {
         }
         // Get the labels from the DB. These will be in preferred locale
         DEBUG && console.log("Getting labels from disk db " + path)
-        //const res = await diskDB.allAsync("SELECT sname || '_' || cname AS labels, calls.callType FROM species JOIN calls ON species.call_id = calls.id ORDER BY species.id")
+        const res = await diskDB.allAsync("SELECT sname || '_' || cname AS label, calls.callType FROM species JOIN calls ON species.call_id = calls.id ORDER BY species.id")
         
-        //LABELS = res.map(obj => `${obj.labels} (${obj.callType})`); // these are the labels in the preferred locale
+        LABELS = res.map(obj => 
+            obj.callType ? `${obj.label} (${obj.callType})` : obj.label
+          ); // these are the labels in the preferred locale
 
         DEBUG && console.log("Opened and cleaned disk db " + file)
     }
@@ -229,7 +236,7 @@ let sampleRate; // Should really make this a property of the model
 let predictWorkers = [], aborted = false;
 let audioCtx;
 // Set up the audio context:
-function setAudioContext(rate) {
+function setAudioContext() {
     audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: sampleRate });
 }
 
@@ -579,10 +586,16 @@ const prepSummaryStatement = (included) => {
     const params = [STATE.detect.confidence];
     let summaryStatement = `
     WITH ranked_records AS (
-        SELECT records.dateTime, records.confidence, files.name, cname, sname, COALESCE(callCount, 1) as callCount, speciesID, isDaylight,
+        SELECT records.dateTime, records.confidence, files.name, 
+        CASE 
+            WHEN species.call_id > 0 THEN species.cname || ' (' || calls.callType || ')' 
+            ELSE species.cname 
+        END AS cname, 
+       sname, COALESCE(callCount, 1) as callCount, speciesID, isDaylight,
         RANK() OVER (PARTITION BY fileID, dateTime ORDER BY records.confidence DESC) AS rank
         FROM records
         JOIN files ON files.id = records.fileID
+        JOIN calls ON species.call_id = calls.id
         JOIN species ON species.id  = records.speciesID
         WHERE confidence >=  ? `;
     // If you're using the memory db, you're either anlaysing one,  or all of the files
@@ -678,7 +691,10 @@ const prepResultsStatement = (species, noLimit, included, offset, topRankin) => 
         records.position, 
         records.speciesID,
         species.sname, 
-        species.cname, 
+            CASE 
+                WHEN species.call_id > 0 THEN species.cname || ' (' || calls.callType || ')' 
+                ELSE species.cname 
+            END AS cname, 
         records.confidence as score, 
         records.label, 
         records.comment, 
@@ -688,6 +704,7 @@ const prepResultsStatement = (species, noLimit, included, offset, topRankin) => 
         RANK() OVER (PARTITION BY fileID, dateTime ORDER BY records.confidence DESC) AS rank
         FROM records 
         JOIN species ON records.speciesID = species.id 
+        JOIN calls ON species.call_id = calls.id
         JOIN files ON records.fileID = files.id 
         WHERE confidence >= ?
         `;
@@ -2037,7 +2054,7 @@ const generateInsertQuery = async (latestResult, file) => {
         for (let j = 0; j < confidenceArray.length; j++) {
             const confidence = Math.round(confidenceArray[j] * 1000);
             if (confidence < 50) break;
-            const speciesID = speciesIDArray[j] + 1;
+            const speciesID = speciesIDArray[j];
             insertQuery += `(${timestamp}, ${key}, ${fileID}, ${speciesID}, ${confidence}, null, null, ${key + 3}, null, ${isDaylight}), `;
         }
     }
@@ -2082,7 +2099,7 @@ const parsePredictions = async (response) => {
                     confidenceRequired = STATE.detect.confidence;
                 }
                 if (confidence >= confidenceRequired) {
-                    const record = await memoryDB.getAsync(`SELECT cname, sname, callType FROM species JOIN calls ON species.call_id = calls.id WHERE species.id = ${speciesID + 1}`).catch(error => console.warn('Error getting species name', error));
+                    const record = await memoryDB.getAsync(`SELECT cname, sname, callType FROM species JOIN calls ON species.call_id = calls.id WHERE species.id = ${speciesID}`).catch(error => console.warn('Error getting species name', error));
                     const { cname, sname, callType } = record;
                     let common = callType ? `${cname} (${callType})` : cname;
                     const result = {
@@ -2719,6 +2736,36 @@ const onSave2DiskDB = async ({file}) => {
     let response = await memoryDB.runAsync('INSERT OR IGNORE INTO disk.duration SELECT * FROM duration');
     DEBUG && console.log(response.changes + ' date durations added to disk database');
     // now update records
+
+    // Insert new species from memory to archive if they don't exist
+    response = await memoryDB.runAsync(`
+        INSERT INTO disk.species (sname, cname, call_id)
+        SELECT mem.sname, mem.cname, mem.call_id
+        FROM species AS mem
+        LEFT JOIN disk.species AS archive
+        ON mem.sname = archive.sname AND mem.call_id = archive.call_id
+        WHERE archive.id IS NULL`);
+
+    //Update memory records with the correct speciesID from the archive
+    response = await memoryDB.runAsync(`
+        UPDATE records
+        SET speciesID = (
+            SELECT archive.id 
+            FROM disk.species AS archive
+            WHERE records.speciesID = (
+                SELECT mem.id
+                FROM species AS mem
+                WHERE mem.sname = archive.sname AND mem.call_id = archive.call_id
+            )
+        )
+        WHERE EXISTS (
+            SELECT 1
+            FROM disk.species AS archive
+            JOIN species AS mem
+            ON mem.sname = archive.sname AND mem.call_id = archive.call_id
+            WHERE mem.id = records.speciesID
+        )`);
+        
     response = await memoryDB.runAsync(`
     INSERT OR IGNORE INTO disk.records 
     SELECT * FROM records

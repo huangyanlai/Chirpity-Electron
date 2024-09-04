@@ -280,7 +280,6 @@ class Model {
         if (newPrediction) newPrediction.dispose();
         keys = keys.map(key => (key / CONFIG.sampleRate).toFixed(3));
         return [keys, topIndices, topValues];
-
     }
 
     makeSpectrogram(signal) {
