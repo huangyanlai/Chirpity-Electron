@@ -4443,17 +4443,7 @@ DOM.gain.addEventListener('input', () => {
                     break;
                 }
                 case 'locale': {
-                    let labelFile;
-                    if (element.value === 'custom'){
-                        labelFile = config.customListFile[config.model];
-                        if (! labelFile) {
-                             generateToast({message: 'You must select a label file in the list settings to use the custom language option.'});
-                            return;
-                        }
-                    } else {
-                        const chirpity = element.value === 'en_uk' && config.model !== 'birdnet' ? 'chirpity' : '';
-                        labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_${chirpity}Labels_${element.value}.txt`; 
-                    }
+                    let labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_Labels_${element.value}.txt`;
                     config[config.model].locale = element.value;
                     readLabels(labelFile, 'locale');
                     break;

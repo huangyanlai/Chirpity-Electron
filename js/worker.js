@@ -165,11 +165,11 @@ const createDB = async (file) => {
     await getLabelsFromConfig();
 
     for (const index in LABELS) {
-        const [sname, cname] = LABELS[index].replaceAll("'", "''").split('_');
+        const [sname, cname] = LABELS[index].split('_');
         const [common, callType] = parseCname(cname);
         // We do this to ensure the index starts with 0
-        await db.runAsync(`INSERT OR IGNORE INTO species VALUES (${index}, '${sname}', '${common}', ${callType})`);
-        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, '${sname}', '${common}', ${callType})`)
+        await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', index, sname, common, callType);
+        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, ${sname}, ${common}, ${callType})`)
     }
     archiveMode || await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
 
@@ -3180,51 +3180,12 @@ const onFileDelete = async (fileName) => {
     
 async function onUpdateLocale(locale, labels, refreshResults){
     let t0 = performance.now();
-    await diskDB.runAsync('BEGIN');
     await memoryDB.runAsync('BEGIN');
-    if (STATE.model === 'birdnet'){
-        for (let i = 0; i < labels.length; i++){
-            const [sname, cname] = labels[i].trim().split('_');
-            await diskDB.runAsync('UPDATE species SET cname = ? WHERE sname = ?', cname, sname);
-            await memoryDB.runAsync('UPDATE species SET cname = ? WHERE sname = ?', cname, sname);
-        }
-    } else {
-        for (let i = 0; i < labels.length; i++) {
-            const [sname, newCname] = labels[i].split('_');
-            // For chirpity, we check if the existing cname ends with a <call type> in brackets
-            const existingCnameResult = await memoryDB.allAsync('SELECT cname FROM species WHERE sname = ?', sname);
-            if (existingCnameResult.length) {
-                for (let i = 0; i < existingCnameResult.length; i++){
-                    const {cname} = existingCnameResult[i];
-                    const existingCname = cname;
-                    const existingCnameMatch = existingCname.match(/\(([^)]+)\)$/); // Regex to match word(s) within brackets at the end of the string
-                    const newCnameMatch = newCname.match(/\(([^)]+)\)$/);
-                    // Do we have a spcific call type to match?
-                    if (newCnameMatch){
-                        // then only update the database where existing and new call types match
-                        if (newCnameMatch[0] === existingCnameMatch[0]){
-                            const callTypeMatch = '%' + newCnameMatch[0] + '%' ;
-                            await diskDB.runAsync("UPDATE species SET cname = ? WHERE sname = ? AND cname LIKE ?", newCname, sname, callTypeMatch);
-                            await memoryDB.runAsync("UPDATE species SET cname = ? WHERE sname = ? AND cname LIKE ?", newCname, sname, callTypeMatch);
-                        }
-                    } else { // No (<call type>) in the new label - so we add the new name to all the species call types in the database
-                        let appendedCname = newCname, bracketedWord;
-                        if (existingCnameMatch) {
-                            bracketedWord = existingCnameMatch[0];
-                            appendedCname += ` ${bracketedWord}`; // Append the bracketed word to the new cname (for each of the existingCnameResults)
-                            const callTypeMatch = '%' + bracketedWord + '%';
-                            await diskDB.runAsync("UPDATE species SET cname = ? WHERE sname = ? AND cname LIKE ?", appendedCname, sname, callTypeMatch);
-                            await memoryDB.runAsync("UPDATE species SET cname = ? WHERE sname = ? AND cname LIKE ?", appendedCname, sname, callTypeMatch);
-                        } else {
-                            await diskDB.runAsync("UPDATE species SET cname = ? WHERE sname = ?", appendedCname, sname);
-                            await memoryDB.runAsync("UPDATE species SET cname = ? WHERE sname = ?", appendedCname, sname);
-                        }
-                    }
-                }
-            }
-        }
+    for (let i = 0; i < labels.length; i++){
+        const [sname, cname] = labels[i].trim().split('_');
+        await memoryDB.runAsync('UPDATE species SET cname = ? WHERE sname = ?', cname, sname);
+        await memoryDB.runAsync('UPDATE disk.species SET cname = ? WHERE sname = ?', cname, sname);
     }
-    await diskDB.runAsync('END');
     await memoryDB.runAsync('END');
     STATE.update({locale: locale});
     if (refreshResults) await Promise.all([getResults(), getSummary()])
