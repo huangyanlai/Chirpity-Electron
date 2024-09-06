@@ -1850,44 +1850,74 @@ function generateBirdList(store, rows) {
     const chart = document.getElementById('chart-list');
     const explore = document.getElementById('explore-list');
     const listHTML = generateBirdOptionList({ store, rows });
-    chart.innerHTML = listHTML;
-    explore.innerHTML = listHTML;
+    chart.innerHTML = '';
+    explore.innerHTML = '';
+    chart.appendChild(listHTML);
+    explore.appendChild(listHTML);
 }
 
 
 
 function generateBirdOptionList({ store, rows, selected }) {
-    let listHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    // Create the form-floating div container
+    const formFloatingDiv = document.createElement('div');
+    formFloatingDiv.className = 'form-floating';
+
+    // Create the select element
+    const selectElement = document.createElement('select');
+    selectElement.spellcheck = false;
+    selectElement.id = store === 'allSpecies' ? 'bird-list-all' : 'bird-list-seen';
+    selectElement.className = 'input form-select mb-3';
+    selectElement.setAttribute('aria-label', '.form-select');
+    selectElement.required = true;
+
+    // Create the first option element ("All")
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = 'All';
+    fragment.appendChild(allOption);
+
     if (store === 'allSpecies') {
         let sortedList = LABELS.map(label => label.split('_')[1]);
-        
-        // International language sorting, recommended for large arrays - 'en_uk' not valid, but same as 'en'
+
+        // International language sorting
         sortedList.sort(new Intl.Collator(config[config.model].locale.replace('_uk', '')).compare);
-        // Check if we have prepared this before
-        const all = document.getElementById('allSpecies');
+
         const lastSelectedSpecies = selected || STATE.birdList.lastSelectedSpecies;
-        listHTML += '<div class="form-floating"><select spellcheck="false" id="bird-list-all" class="input form-select mb-3" aria-label=".form-select" required>';
-        listHTML += '<option value="">All</option>';
-        for (const item in sortedList) {
-            //const [sname, cname] = labels[item].split('_');
-            if (sortedList[item] !== lastSelectedSpecies) {
-                listHTML += `<option value="${sortedList[item]}">${sortedList[item]}</option>`;
-            } else {
-                listHTML += `<option value="${sortedList[item]}" selected>${sortedList[item]}</option>`;
-            }
+        for (const item of sortedList) {
+            const option = document.createElement('option');
+            option.value = item;
+            option.textContent = item;
+            if (item === lastSelectedSpecies) option.selected = true;
+            fragment.appendChild(option);
         }
-        listHTML += '</select><label for="bird-list-all">Species</label></div>';
     } else {
-        listHTML += '<select id="bird-list-seen" class="form-select"><option value="">All</option>';
-        for (const item in rows) {
-            const isSelected = rows[item].cname === STATE.chart.species ? 'selected' : '';
-            listHTML += `<option value="${rows[item].cname}" ${isSelected}>${rows[item].cname}</option>`;
+        for (const item of rows) {
+            const option = document.createElement('option');
+            option.value = item.cname;
+            option.textContent = item.cname;
+            if (item.cname === STATE.chart.species) option.selected = true;
+            fragment.appendChild(option);
         }
-        listHTML += '</select><label for="bird-list-seen">Species</label>';
     }
-    
-    return listHTML;
+
+    // Append all options to the select element
+    selectElement.appendChild(fragment);
+
+    // Create the label element
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = selectElement.id;
+    labelElement.textContent = 'Species';
+
+    // Append select and label to the form-floating div
+    formFloatingDiv.appendChild(selectElement);
+    formFloatingDiv.appendChild(labelElement);
+
+    return formFloatingDiv;
 }
+
 
 function generateBirdIDList(rows) {
     let listHTML = '';
@@ -4768,11 +4798,13 @@ async function readLabels(labelFile, updating){
             typeIndex = ['Local', 'Nocmig', ''].indexOf(activeRow.querySelector('.label').textContent);
         }
         const recordEntryBirdList = recordEntryForm.querySelector('#record-entry-birdlist');
+        recordEntryBirdList.innerHTML = '';
         focusBirdList = () => {
             const allBirdList = document.getElementById('bird-list-all')
             allBirdList.focus()
         }
-        recordEntryBirdList.innerHTML = generateBirdOptionList({ store: 'allSpecies', rows: undefined, selected: cname });
+        const innerHTML = generateBirdOptionList({ store: 'allSpecies', rows: undefined, selected: cname });
+        recordEntryBirdList.appendChild(innerHTML);
         const batchHide = recordEntryForm.querySelectorAll('.hide-in-batch');
         batchHide.forEach(el => batch ? el.classList.add('d-none') : el.classList.remove('d-none'));
         recordEntryForm.querySelector('#call-count').value = callCount;

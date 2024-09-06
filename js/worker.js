@@ -164,11 +164,11 @@ const createDB = async (file) => {
     
     await getLabelsFromConfig();
 
-    for (const index in LABELS) {
-        const [sname, cname] = LABELS[index].split('_');
+    for (let i = 0; i < LABELS.length; i++) {
+        const [sname, cname] = LABELS[i].split('_');
         const [common, callType] = parseCname(cname);
         // We do this to ensure the index starts with 0
-        await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', index, sname, common, callType);
+        await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', i, sname, common, callType);
         DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, ${sname}, ${common}, ${callType})`)
     }
     archiveMode || await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
@@ -2748,7 +2748,7 @@ const onSave2DiskDB = async ({file}) => {
 
     //Update memory records with the correct speciesID from the archive
     response = await memoryDB.runAsync(`
-        UPDATE records
+        UPDATE OR REPLACE records
         SET speciesID = (
             SELECT archive.id 
             FROM disk.species AS archive
@@ -2757,13 +2757,6 @@ const onSave2DiskDB = async ({file}) => {
                 FROM species AS mem
                 WHERE mem.sname = archive.sname AND mem.call_id = archive.call_id
             )
-        )
-        WHERE EXISTS (
-            SELECT 1
-            FROM disk.species AS archive
-            JOIN species AS mem
-            ON mem.sname = archive.sname AND mem.call_id = archive.call_id
-            WHERE mem.id = records.speciesID
         )`);
         
     response = await memoryDB.runAsync(`
@@ -2939,9 +2932,15 @@ const getRate = (species) => {
 const getDetectedSpecies = () => {
     const range = STATE.explore.range;
     const confidence = STATE.detect.confidence;
-    let sql = `SELECT cname, locationID
+    let sql = `SELECT                 
+                CASE 
+                    WHEN species.call_id > 0 THEN species.cname || ' (' || calls.callType || ')' 
+                    ELSE species.cname 
+                END AS cname, 
+                locationID
     FROM records
     JOIN species ON species.id = records.speciesID 
+    JOIN calls ON species.call_id = calls.id
     JOIN files on records.fileID = files.id`;
     
     if (STATE.mode === 'explore') sql += ` WHERE confidence >= ${confidence}`;
@@ -2964,18 +2963,27 @@ const getDetectedSpecies = () => {
 const getValidSpecies = async (file) => {
     const included = await getIncludedIDs(file);
     let excludedSpecies, includedSpecies;
-    let sql = `SELECT cname, sname FROM species`;
+    let sql = `SELECT             
+                CASE 
+                    WHEN species.call_id > 0 THEN species.cname || ' (' || calls.callType || ')' 
+                    ELSE species.cname 
+                END AS cname, 
+                sname FROM species 
+                JOIN calls ON calls.id = species.call_id;`;
     // We'll ignore Unknown Sp. here, hence length < (LABELS.length *-1*)
 
     if (filtersApplied(included)) {
         sql += ` WHERE id IN (${included.join(',')})`;
     }
     sql += ' GROUP BY cname ORDER BY cname';
-    includedSpecies = await diskDB.allAsync(sql)
+    includedSpecies = await STATE.db.allAsync(sql);
+    // Ensure the results are sorted by `cname` (doing this in the db query sees it jumbled in the javascript array)
+    includedSpecies.sort((a, b) => a.cname.localeCompare(b.cname));
     
     if (filtersApplied(included)){
         sql = sql.replace('IN', 'NOT IN');
-        excludedSpecies = await diskDB.allAsync(sql);
+        excludedSpecies = await STATE.db.allAsync(sql);
+        excludedSpecies.sort((a, b) => a.cname.localeCompare(b.cname));
     }
     UI.postMessage({ event: 'valid-species-list', included: includedSpecies, excluded: excludedSpecies })
 };
@@ -3296,19 +3304,33 @@ async function getIncludedIDs(file){
 
 let LIST_CACHE = {};
 
+async function getLabelsFromDB(db){
+        // Get current labels:
+        const labels = await db.allAsync(`
+            SELECT
+                CASE 
+                    WHEN species.call_id > 0 THEN species.sname || '_' || species.cname || ' (' || calls.callType || ')' 
+                    ELSE species.sname || '_' || species.cname 
+                END AS cname
+            FROM species JOIN calls ON species.call_id = calls.id`)
+        return labels.map(row => row.cname)
+}
+
 async function setIncludedIDs(lat, lon, week) {
     const key = `${lat}-${lon}-${week}-${STATE.model}-${STATE.list}`;
     if (LIST_CACHE[key]) {
         // If a promise is in the cache, return it
         return await LIST_CACHE[key];
     }
-    console.log('calling for a new list')
+    LABELS = await getLabelsFromDB(STATE.db);
+    DEBUG && console.log('calling for a new list')
     // Store the promise in the cache immediately
     LIST_CACHE[key] = (async () => {
         const { result, messages } = await LIST_WORKER({
             message: 'get-list',
             model: STATE.model,
             listType: STATE.list,
+            currentLabels: LABELS,
             customList: STATE.customList,
             lat: lat || STATE.lat,
             lon: lon || STATE.lon,
@@ -3317,7 +3339,7 @@ async function setIncludedIDs(lat, lon, week) {
             localBirdsOnly: STATE.local,
             threshold: STATE.speciesThreshold
         });
-        // Add the index of "Unknown Sp." to all lists
+        // Add the index of "Unknown Sp." to all lists --FIXME: assumes unknown sp. is the last item in the label list!!
         STATE.list !== 'everything' && result.push(LABELS.length - 1)
         
         let includedObject = {};

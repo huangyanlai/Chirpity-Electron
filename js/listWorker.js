@@ -11,7 +11,7 @@ try {
 }
 const fs = require('node:fs');
 const path = require('node:path');
-let DEBUG = false;
+let DEBUG = true;
 
 
 //GLOBALS
@@ -138,9 +138,31 @@ const CHIRPITY_LABELS = config.labels;
 config = undefined;
 
 
-/* USAGE EXAMPLES:
+/* 
+How it works:
+Generates a list of labels (in english) from config files for the specified model.These are always in English.
+Spits out a list of indices to include - i.e. the position of the species to include as they appear in the list.
+
+To update, it will need to receive the labels from the current database. It will need to compare this with the config labels, 
+because the metadata model returns thresholds for each of the indices in the birdnet model.
+
+1. Get birdnet list from config
+2. Use the metadata model to establish which of these indices to include
+3. convert this list to one of latin names
+4. find species with that latin name in the current db labels
+5. return the matching indices in the current label list
+
+Todo:
+1. Ensure the current labels reflect the database in use
+1. pass current labels to listworker
+
+
+USAGE EXAMPLES:
+
 listWorker.postMessage({message: 'load'})
 listWorker.postMessage({message: 'get-list', model: 'chirpity', listType: 'location', useWeek: true, lat: 52.0, lon: -0.5, week: 40, threshold: 0.01 })
+
+
 */
 
 onmessage = async (e) => {
@@ -150,7 +172,7 @@ onmessage = async (e) => {
         switch (message) {
 
             case "get-list": {
-                const {model, listType, useWeek, customList}  = e.data;
+                const {model, listType, currentLabels, useWeek, customList}  = e.data;
                 listModel.customList = customList;
                 listModel.model = model;
                 NOT_BIRDS = model === 'birdnet' ? BIRDNET_NOT_BIRDS : CHIRPITY_NOT_BIRDS;
@@ -161,7 +183,7 @@ onmessage = async (e) => {
                 let threshold = parseFloat(e.data.threshold);
                 let localBirdsOnly = e.data.localBirdsOnly;
                 DEBUG && console.log(`Setting list to ${listType}`);
-                const [includedIDs, messages] = await listModel.setList({lat, lon, week, listType, useWeek, threshold, localBirdsOnly});
+                const [includedIDs, messages] = await listModel.setList({lat, lon, week, listType, currentLabels, useWeek, threshold, localBirdsOnly});
                 postMessage({
                     message: "your-list-sir",
                     result: includedIDs,
@@ -194,55 +216,39 @@ class Model {
             }
     }
 
-    async setList({lat, lon, week, listType, useWeek, threshold, localBirdsOnly}) {
+    async setList({lat, lon, week, listType, currentLabels, useWeek, threshold, localBirdsOnly}) {
         let includedIDs = [], messages = [];
         week = useWeek ? week : -1;
         if (listType === "everything") {
-            includedIDs = this.labels.map((_, index) => index);
-        }
-
-        else if (listType === 'location'){
+            includedIDs = currentLabels.map((_, index) => index);
+        } else if (listType === 'location'){
             DEBUG && console.log('lat', lat, 'lon', lon, 'week', week)
             this.mdata_input = tf.tensor([lat, lon, week]).expandDims(0);
             const mdata_prediction = this.metadata_model.predict(this.mdata_input);
             const mdata_probs = await mdata_prediction.data();
             let count = 0;
-            if (this.model === 'birdnet'){
-                for (let i = 0; i < mdata_probs.length; i++) {
-                    if (mdata_probs[i] > threshold) {
-                        count++;
-                        includedIDs.push(i);
-                        DEBUG && console.log("including:", this.labels[i] + ': ' + mdata_probs[i]);
-
-                    } else {
-                        DEBUG && console.log("Excluding:", this.labels[i] + ': ' + mdata_probs[i]);
-                    }
-                }
-            } else {
-                for (let i = 0; i < mdata_probs.length; i++) {
-                    const index = i; // mdata_probs.indexOf(mdata_probs_sorted[i]);
-                    if (mdata_probs[index] < threshold) {
-                        DEBUG && console.log('Excluding:', this.mdata_labels[index] + ': ' + mdata_probs[index]);
-                    } else {
+            for (let i = 0; i < mdata_probs.length; i++) {
+                const index = i; // mdata_probs.indexOf(mdata_probs_sorted[i]);
+                if (mdata_probs[index] < threshold) {
+                    DEBUG && console.log('Excluding:', this.mdata_labels[index] + ': ' + mdata_probs[index]);
+                } else {
+                    
+                    const latin = getFirstElement(this.mdata_labels[index]);
+                    // Use the reduce() method to accumulate the indices of species containing the latin name
+                    const foundIndices = currentLabels.reduce((indices, element, index) => {
+                        element.includes(latin) && indices.push(index);
+                        return indices;
+                    }, []);
+                    foundIndices.forEach(index => {
                         count++
-                        const latin = this.mdata_labels[index].split('_')[0];
-                        // Use the reduce() method to accumulate the indices of species containing the latin name
-                        const foundIndices = this.labels.reduce((indices, element, index) => {
-                            element.includes(latin) && indices.push(index);
-                            return indices;
-                        }, []);
-                        foundIndices.forEach(index => {
-                            // If we want an override list...=>
-                            //if (! ['Dotterel', 'Stone-curlew', 'Spotted Crake'].some(this.labels[index])) BLOCKED_IDS.push(index)
-                            includedIDs.push(index)
-                            DEBUG && console.log('Including: ', index, 'name', this.labels[index], 'probability', mdata_probs[i].toFixed(5) )
-                        })
-                    }
+                        // If we want an override list...=>
+                        //if (! ['Dotterel', 'Stone-curlew', 'Spotted Crake'].some(this.labels[index])) BLOCKED_IDS.push(index)
+                        includedIDs.push(index)
+                        DEBUG && console.log('Including: ', index, 'name', currentLabels[index], 'probability', mdata_probs[i].toFixed(5) )
+                    })
                 }
             }
-            DEBUG && console.log('Total species considered at this location: ', count)
-            // return an object
-            //includedIDs = {week: week, lat: lat, lon:lon, included: includedIDs}            
+            DEBUG && console.log('Total species considered at this location: ', count)  
         } else if (listType === 'nocturnal') {
             if (this.model === 'chirpity') {
                 for (let i = 0; i < this.labels.length; i++) {
@@ -250,17 +256,27 @@ class Model {
                     if (NOCTURNAL.has(item)) includedIDs.push(i);
                 }
             } else {
-                // Get list of IDs of birds that call through the night or all the time. Exclude non-avian classes
+                // Get list of latin names of birds that call through the night or all the time. Exclude non-avian classes
                 for (let i = 0; i < this.labels.length; i++) {
                     const item = this.labels[i];
-                    if (ACTIVITY_INDEX[item]  !== 1 && BIRDNET_NOT_BIRDS.indexOf(item) < 0) includedIDs.push(i);     
+                    if (ACTIVITY_INDEX[item]  !== 1 && BIRDNET_NOT_BIRDS.indexOf(item) < 0) {
+                        let latin = getFirstElement(item);
+                        // find the index of these birds in the current labels:
+                        const foundIndices = currentLabels.reduce((indices, element, index) => {
+                            element.includes(latin) && indices.push(index);
+                            return indices;
+                        }, []);
+                        foundIndices.forEach(index => {
+                            includedIDs.push(index)
+                            DEBUG && console.log('Including: ', index, 'name', this.labels[index] )
+                        })
+                    }
                 }
                 if (localBirdsOnly){
-                    const additionalIDs = includedIDs;
                     // Now get list of local birds
-                    const local_ids = await this.setList({lat,lon,week, listType:'location', useWeek, threshold})
+                    const [local_ids, _] = await this.setList({lat,lon,week, listType:'location', currentLabels, useWeek, threshold})
                     // Create a list of indices that appear in both lists
-                    includedIDs = additionalIDs.filter(id => local_ids[0].includes(id));
+                    includedIDs = getCommonElements(includedIDs, local_ids);
                 }
             } 
         } else if (listType === 'custom'){
@@ -323,6 +339,12 @@ class Model {
         }
         return [includedIDs, messages];
     }
+}
+
+function getCommonElements(largeList, smallList){
+    const largeSet = new Set(largeList);
+    // Filter the smaller list based on whether the element exists in the Set
+    return smallList.filter(item => largeSet.has(item));
 }
 function findAllIndexes(array, value) {
     return array.reduce((acc, currentValue, currentIndex) => {
