@@ -404,7 +404,8 @@ async function handleMessage(e) {
             // Clear the LIST_CACHE & STATE.included kesy to force list regeneration
             LIST_CACHE = {}; //[`${lat}-${lon}-${week}-${STATE.model}-${STATE.list}`];
             delete STATE.included?.[STATE.model]?.[STATE.list];
-            LIST_WORKER && await setIncludedIDs(lat, lon, week )
+            const dbToUse = STATE.db.filename !== ':memory' ? 'archive' : STATE.model;
+            LIST_WORKER && await setIncludedIDs(dbToUse, lat, lon, week )
             args.refreshResults && await Promise.all([getResults(), getSummary()]);
             break;
         }
@@ -2746,6 +2747,7 @@ const onSave2DiskDB = async ({file}) => {
         ON mem.sname = archive.sname AND mem.call_id = archive.call_id
         WHERE archive.id IS NULL`);
 
+    DEBUG && console.log(`${response.changes} updates to the species table after ${(Date.now() - t0)/1000} seconds.`)
     //Update memory records with the correct speciesID from the archive
     response = await memoryDB.runAsync(`
         UPDATE OR REPLACE records
@@ -2757,29 +2759,33 @@ const onSave2DiskDB = async ({file}) => {
                 FROM species AS mem
                 WHERE mem.sname = archive.sname AND mem.call_id = archive.call_id
             )
-        )`);
-        
+        ) WHERE confidence >= ${STATE.detect.confidence} ${filterClause}`);
+
+    const fromArchive = true;
+    const archive_included = await getIncludedIDs(file, fromArchive);
+    let archive_filterClause = filtersApplied(archive_included) ? `AND speciesID IN (${archive_included} )` : '';
+
+    DEBUG && console.log(`${response.changes} updates to IDs in the records table after ${(Date.now() - t0)/1000} seconds.`)
     response = await memoryDB.runAsync(`
-    INSERT OR IGNORE INTO disk.records 
-    SELECT * FROM records
-    WHERE confidence >= ${STATE.detect.confidence} ${filterClause} `);
+        INSERT OR IGNORE INTO disk.records 
+        SELECT * FROM records
+        WHERE confidence >= ${STATE.detect.confidence} ${archive_filterClause} `);
     DEBUG && console.log(response?.changes + ' records added to disk database');
     await memoryDB.runAsync('END');
     DEBUG && console.log("transaction ended");
-    if (response?.changes) {
-        UI.postMessage({ event: 'diskDB-has-records' });
-        if (!DATASET) {
-            
-            // Now we have saved the records, set state to DiskDB
-            await onChangeMode('archive');
-            getLocations({ db: STATE.db, file: file });
-            UI.postMessage({
-                event: 'generate-alert',
-                message: `Database update complete, ${response.changes} records added to the archive in ${((Date.now() - t0) / 1000)} seconds`,
-                updateFilenamePanel: true
-            })
-        }
+    if (response?.changes)  UI.postMessage({ event: 'diskDB-has-records' });
+    if (!DATASET) {
+        // Now we have saved the records, set state to DiskDB
+        await onChangeMode('archive');
+        UI.postMessage({event: 'labels', labels: await getLabelsFromDB(STATE.db)})
+        getLocations({ db: STATE.db, file: file });
+        UI.postMessage({
+            event: 'generate-alert',
+            message: `Database update complete, ${response.changes} records added to the archive in ${((Date.now() - t0) / 1000)} seconds`,
+            updateFilenamePanel: true
+        })
     }
+
 };
 
 const filterLocation = () => STATE.locationID ? ` AND files.locationID = ${STATE.locationID}` : '';
@@ -3258,9 +3264,12 @@ async function getLocations({ db = STATE.db, file }) {
  * @param {*} file 
  * @returns a list of IDs included in filtered results
  */
-async function getIncludedIDs(file){
+async function getIncludedIDs(file, fromArchive){
     t0 = Date.now();
     let lat, lon, week, hitOrMiss = 'hit';
+    // Ensure the correct list is requested
+    const dbToUse = fromArchive || STATE.db.filename !== ':memory:' ? 'archive' : STATE.model;
+
     if (STATE.list === 'location' || (STATE.list === 'nocturnal' && STATE.local)){
         if (file){
             file = metadata[file];
@@ -3274,22 +3283,22 @@ async function getIncludedIDs(file){
             week = STATE.useWeek ? STATE.week : "-1";
         }
         const location = lat.toString() + lon.toString();
-        if (STATE.included?.[STATE.model]?.[STATE.list]?.[week]?.[location] === undefined ) {
+        if (STATE.included?.[dbToUse]?.[STATE.list]?.[week]?.[location] === undefined ) {
             // Cache miss
-            const list = await setIncludedIDs(lat,lon,week)
+            await setIncludedIDs(dbToUse, lat,lon,week)
             hitOrMiss = 'miss';
         } 
-        //DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
-        return STATE.included[STATE.model][STATE.list][week][location];
+        DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
+        return STATE.included[dbToUse][STATE.list][week][location];
         
     } else {
-        if (STATE.included?.[STATE.model]?.[STATE.list] === undefined) {
+        if (STATE.included?.[dbToUse]?.[STATE.list] === undefined) {
             // The object lacks the week / location
-            LIST_WORKER && await setIncludedIDs();
+            LIST_WORKER && await setIncludedIDs(dbToUse);
             hitOrMiss = 'miss';
         }
-        //DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
-        return STATE.included[STATE.model][STATE.list];
+        DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
+        return STATE.included[dbToUse][STATE.list];
     }
 }
 
@@ -3316,14 +3325,15 @@ async function getLabelsFromDB(db){
         return labels.map(row => row.cname)
 }
 
-async function setIncludedIDs(lat, lon, week) {
-    const key = `${lat}-${lon}-${week}-${STATE.model}-${STATE.list}`;
+async function setIncludedIDs(dbToUse, lat, lon, week) {
+    const key = `${lat}-${lon}-${week}-${dbToUse}-${STATE.list}`;
     if (LIST_CACHE[key]) {
         // If a promise is in the cache, return it
         return await LIST_CACHE[key];
     }
-    LABELS = await getLabelsFromDB(STATE.db);
-    DEBUG && console.log('calling for a new list')
+    const db = dbToUse === 'archive' ? diskDB : STATE.db;
+    LABELS = await getLabelsFromDB(db);
+    DEBUG && console.log(`calling for a new list with ${LABELS.length} labels`);
     // Store the promise in the cache immediately
     LIST_CACHE[key] = (async () => {
         const { result, messages } = await LIST_WORKER({
@@ -3346,7 +3356,7 @@ async function setIncludedIDs(lat, lon, week) {
         if (STATE.list === 'location' || (STATE.list === 'nocturnal' && STATE.local)){
             const location = lat.toString() + lon.toString();
             includedObject = {
-                [STATE.model]: {
+                [dbToUse]: {
                     [STATE.list]: {
                         [week]: {
                             [location]: result
@@ -3356,7 +3366,7 @@ async function setIncludedIDs(lat, lon, week) {
             };
         } else {
             includedObject = {
-                [STATE.model]: {
+                [dbToUse]: {
                     [STATE.list]: result
                 }
             };
