@@ -1,7 +1,6 @@
 import {trackVisit, trackEvent} from './tracking.js';
 
 let seenTheDarkness = false, shownDaylightBanner = false, LOCATIONS, locationID = undefined;
-const startTime = performance.now();
 let LABELS = [], DELETE_HISTORY = [];
 // Save console.warn and console.error functions
 const originalWarn = console.warn;
@@ -154,8 +153,8 @@ window.electron.getVersion()
 let modelReady = false, fileLoaded = false, currentFile;
 let PREDICTING = false, t0;
 let region, AUDACITY_LABELS = {}, wavesurfer;
-// fileList is all open files, analyseList is the subset that have been analysed;
-let fileList = [], analyseList = [];
+// fileList is all open files
+let fileList = [];
 let fileStart, bufferStartTime, fileEnd;
 
 let zero = new Date(Date.UTC(0, 0, 0, 0, 0, 0));
