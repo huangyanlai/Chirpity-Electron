@@ -2455,7 +2455,7 @@ function onChartData(args) {
         updatePrefs('config.json', config)
         resetResults({clearSummary: true, clearPagination: true, clearResults: true});
         setListUIState(config.list)
-        worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone })
+        worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone, file:currentFile })
     })
     
     DOM.customListSelector.addEventListener('click', async () =>{
@@ -4414,7 +4414,7 @@ DOM.gain.addEventListener('input', () => {
                     }
                     config.speciesThreshold = element.value;
                     worker.postMessage({ action: 'update-state', speciesThreshold: element.value });
-                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone});
+                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone, file:currentFile});
                     break;
                 }
                 case 'timelineSetting': {
@@ -4469,7 +4469,7 @@ DOM.gain.addEventListener('input', () => {
 
                     if (! config.useWeek) STATE.week = -1;
                     worker.postMessage({action:'update-state', useWeek: config.useWeek});
-                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone});
+                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone, file:currentFile});
                     break;
                 }
                 case 'list-to-use': {
@@ -4477,7 +4477,7 @@ DOM.gain.addEventListener('input', () => {
                     config.list = element.value;
                     updateListIcon();
                     resetResults({clearSummary: true, clearPagination: true, clearResults: true});
-                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone});
+                    worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone, file:currentFile});
                     break;
                 }
                 case 'locale': {
@@ -4489,7 +4489,7 @@ DOM.gain.addEventListener('input', () => {
                 case 'local': {
                     config.local = element.checked;
                     worker.postMessage({action: 'update-state', local: config.local })
-                    worker.postMessage({ action: 'update-list', list: config.list });
+                    worker.postMessage({ action: 'update-list', list: config.list , file:currentFile});
                     break;
                 }
                 case 'model-to-use': {
@@ -4664,12 +4664,11 @@ async function readLabels(labelFile, updating){
         LABELS.push('Unknown Sp._Unknown Sp.');
         
         if (updating === 'list'){
-            worker.postMessage({ action: 'update-list', list: config.list, customList: LABELS, refreshResults: STATE.analysisDone});
+            worker.postMessage({ action: 'update-list', list: config.list, customList: LABELS, refreshResults: STATE.analysisDone, file:currentFile});
             trackEvent(config.UUID, 'UI', 'Create', 'Custom list', LABELS.length)
         } else {
             worker.postMessage({action: 'update-locale', locale: config[config.model].locale, labels: LABELS, refreshResults: STATE.analysisDone})
         }
-
     }).catch(error =>{
         console.error('There was a problem reading the label file:', error)
     })

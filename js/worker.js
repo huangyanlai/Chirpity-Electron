@@ -171,7 +171,10 @@ const createDB = async (file) => {
         await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', i, sname, common, callType);
         DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, ${sname}, ${common}, ${callType})`)
     }
-    archiveMode || await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
+    if (! archiveMode){
+        await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
+        await db.runAsync('INSERT INTO files SELECT * FROM disk.files');
+    } 
 
     await db.runAsync('END');
     return db
@@ -356,7 +359,7 @@ async function handleMessage(e) {
         case "get-valid-species": {getValidSpecies(args.file);
             break;
         }
-        case "get-locations": { getLocations({ db: STATE.db, file: args.file });
+        case "get-locations": { sendKnownLocationsToUI({ db: STATE.db, file: args.file });
         break;
         }
         case "get-valid-files-list": { await getFiles(args.files);
@@ -405,7 +408,8 @@ async function handleMessage(e) {
             LIST_CACHE = {}; //[`${lat}-${lon}-${week}-${STATE.model}-${STATE.list}`];
             delete STATE.included?.[STATE.model]?.[STATE.list];
             const dbToUse = STATE.db.filename !== ':memory' ? 'archive' : STATE.model;
-            LIST_WORKER && await setIncludedIDs(dbToUse, lat, lon, week )
+            const included = LIST_WORKER && await setIncludedIDs(dbToUse, lat, lon, week )
+            UI.postMessage({event: 'labels', labels: await getIncludedLabels(args.file)})
             args.refreshResults && await Promise.all([getResults(), getSummary()]);
             break;
         }
@@ -2727,14 +2731,14 @@ const onSave2DiskDB = async ({file}) => {
     let filterClause = filtersApplied(included) ? `AND speciesID IN (${included} )` : '';
     if (STATE.detect.nocmig) filterClause += ' AND isDaylight = FALSE ';
     await memoryDB.runAsync('BEGIN');
-    await memoryDB.runAsync(`INSERT OR IGNORE INTO disk.files SELECT * FROM files`);
+    let response = await memoryDB.runAsync(`INSERT OR IGNORE INTO disk.files SELECT * FROM files`);
     await memoryDB.runAsync(`INSERT OR IGNORE INTO disk.locations SELECT * FROM locations`);
     // Set the saved flag on files' metadata
     for (let file in metadata) {
         metadata[file].isSaved = true
     }
     // Update the duration table
-    let response = await memoryDB.runAsync('INSERT OR IGNORE INTO disk.duration SELECT * FROM duration');
+    response = await memoryDB.runAsync('INSERT OR IGNORE INTO disk.duration SELECT * FROM duration');
     DEBUG && console.log(response.changes + ' date durations added to disk database');
     // now update records
 
@@ -2777,8 +2781,9 @@ const onSave2DiskDB = async ({file}) => {
     if (!DATASET) {
         // Now we have saved the records, set state to DiskDB
         await onChangeMode('archive');
-        UI.postMessage({event: 'labels', labels: await getLabelsFromDB(STATE.db)})
-        getLocations({ db: STATE.db, file: file });
+        LABELS = await getLabelsFromDB(STATE.db)
+        UI.postMessage({event: 'labels', labels: await getIncludedLabels(file)})
+        sendKnownLocationsToUI({ db: STATE.db, file: file });
         UI.postMessage({
             event: 'generate-alert',
             message: `Database update complete, ${response.changes} records added to the archive in ${((Date.now() - t0) / 1000)} seconds`,
@@ -2975,11 +2980,11 @@ const getValidSpecies = async (file) => {
                     ELSE species.cname 
                 END AS cname, 
                 sname FROM species 
-                JOIN calls ON calls.id = species.call_id;`;
+                JOIN calls ON calls.id = species.call_id`;
     // We'll ignore Unknown Sp. here, hence length < (LABELS.length *-1*)
 
     if (filtersApplied(included)) {
-        sql += ` WHERE id IN (${included.join(',')})`;
+        sql += ` WHERE species.id IN (${included.join(',')})`;
     }
     sql += ' GROUP BY cname ORDER BY cname';
     includedSpecies = await STATE.db.allAsync(sql);
@@ -2987,7 +2992,7 @@ const getValidSpecies = async (file) => {
     includedSpecies.sort((a, b) => a.cname.localeCompare(b.cname));
     
     if (filtersApplied(included)){
-        sql = sql.replace('IN', 'NOT IN');
+        sql = sql.replace(' IN', ' NOT IN');
         excludedSpecies = await STATE.db.allAsync(sql);
         excludedSpecies.sort((a, b) => a.cname.localeCompare(b.cname));
     }
@@ -3248,10 +3253,10 @@ async function onSetCustomLocation({ lat, lon, place, files, db = STATE.db }) {
             }
         }
     }
-    await getLocations({ db: db, file: files[0] });
+    await sendKnownLocationsToUI({ db: db, file: files[0] });
 }
     
-async function getLocations({ db = STATE.db, file }) {
+async function sendKnownLocationsToUI({ db = STATE.db, file }) {
     const locations = await db.allAsync('SELECT * FROM locations ORDER BY place')
     UI.postMessage({ event: 'location-list', locations: locations, currentLocation: metadata[file]?.locationID })
 }
@@ -3321,11 +3326,20 @@ async function getLabelsFromDB(db){
                     WHEN species.call_id > 0 THEN species.sname || '_' || species.cname || ' (' || calls.callType || ')' 
                     ELSE species.sname || '_' || species.cname 
                 END AS cname
-            FROM species JOIN calls ON species.call_id = calls.id`)
+            FROM species JOIN calls ON species.call_id = calls.id
+        `)
         return labels.map(row => row.cname)
 }
 
+async function getIncludedLabels(file){
+    const included = await getIncludedIDs(file);
+    return LABELS.filter((label, index) => included.includes(index));
+}
+
 async function setIncludedIDs(dbToUse, lat, lon, week) {
+    lat ??= STATE.lat;
+    lon ??= STATE.lon;
+    week ??=STATE.week;
     const key = `${lat}-${lon}-${week}-${dbToUse}-${STATE.list}`;
     if (LIST_CACHE[key]) {
         // If a promise is in the cache, return it
@@ -3342,9 +3356,9 @@ async function setIncludedIDs(dbToUse, lat, lon, week) {
             listType: STATE.list,
             currentLabels: LABELS,
             customList: STATE.customList,
-            lat: lat || STATE.lat,
-            lon: lon || STATE.lon,
-            week: week || STATE.week,
+            lat: lat,
+            lon: lon,
+            week: week,
             useWeek: STATE.useWeek,
             localBirdsOnly: STATE.local,
             threshold: STATE.speciesThreshold
