@@ -384,6 +384,9 @@ async function handleMessage(e) {
         case "purge-file": {onFileDelete(args.fileName);
             break;
         }
+        case "relocated-file": {onFileUpdated(args.originalFile, args.updatedFile);
+            break;
+        }
         case "save": {DEBUG && console.log("file save requested");
             await saveAudio(args.file, args.start, args.end, args.filename, args.metadata);
             break;
@@ -764,6 +767,7 @@ const prepResultsStatement = (species, noLimit, included, offset, topRankin) => 
     comment,
     end,
     callCount,
+    isDaylight,
     rank
     FROM 
     ranked_records 
@@ -1186,7 +1190,7 @@ const getWavePredictBuffers = async ({
     predictionsRequested[file] = 0;
     let readStream;
     if (! fs.existsSync(file)) {
-        UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`})
+        UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`, file: file})
         return new Error('getWavePredictBuffers: Error extracting audio segment: File not found.');
     }
     // extract the header. With bext and iXML metadata, this can be up to 128k, hence 131072
@@ -1299,7 +1303,7 @@ const getPredictBuffers = async ({
     let chunkStart = start * sampleRate;
     return new Promise((resolve, reject) => {
         if (! fs.existsSync(file)) {
-            UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`})
+            UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`, file: file})
             return reject(new Error('getPredictBuffers: Error extracting audio segment: File not found.'));
         }
         let concatenatedBuffer = Buffer.alloc(0);
@@ -1762,7 +1766,7 @@ const bufferToAudio = async ({
     return new Promise(function (resolve, reject) {
         const bufferStream = new PassThrough();
         if (! fs.existsSync(file)) {
-            UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`})
+            UI.postMessage({event: 'generate-alert', message: `The requested audio file cannot be found: ${file}`, file: file})
             return reject(new Error('bufferToAudio: Error extracting audio segment: File not found.'));
         }
         let ffmpgCommand = ffmpeg(file)
@@ -2028,7 +2032,7 @@ const onInsertManualRecord = async ({ cname, start, end, comment, count, file, l
     }
     return changes;
 }
-                        
+
 const generateInsertQuery = async (latestResult, file) => {
     const db = STATE.db;              
     await db.runAsync('BEGIN');              
@@ -2463,17 +2467,35 @@ const getResults = async ({
     
     let index = offset;
     AUDACITY = {};
-    //const params = getResultsParams(species, confidence, offset, limit, topRankin, included);
+
     const [sql, params] = prepResultsStatement(species, limit === Infinity, included, offset, topRankin);
     
     const result = await STATE.db.allAsync(sql, ...params);
     let formattedValues;
-    if (format === 'text' || format === 'eBird'){
-        // CSV export. Format the values
-        formattedValues = await Promise.all(result.map(async (item) => {
-            return format === 'text' ? await formatCSVValues(item) : await formateBirdValues(item) 
+    let previousFile = null, cumulativeOffset = 0; 
 
+    const formatFunctions = {
+        text: formatCSVValues,
+        eBird: formateBirdValues,
+        Raven: formatRavenValues
+    };
+    
+    if (format in formatFunctions) {
+        // CSV export. Format the values
+        formattedValues = await Promise.all(result.map(async (item, index) => {
+            if (format === 'Raven') {
+                item = { ...item, selection: index + 1 } // Add a selection number for Raven
+                 if (item.file !== previousFile){ // Positions need to be cumulative across files in Raven
+                    if (previousFile !== null){
+                        cumulativeOffset += result.find(r => r.file === previousFile).duration;
+                    }
+                    previousFile = item.file;
+                }
+                item.offset = cumulativeOffset;
+            }
+            return await formatFunctions[format](item);
         }));
+    
         if (format === 'eBird'){
             // Group the data by "Start Time", "Common name", and "Species" and calculate total species count for each group
             const summary = formattedValues.reduce((acc, curr) => {
@@ -2512,9 +2534,9 @@ const getResults = async ({
         }
         // Create a write stream for the CSV file
         let filename = species || 'All';
-        filename += '_detections.csv';
+        filename += format == 'Raven' ? `_selections.txt` : '_detections.csv';
         const filePath = p.join(directory, filename);
-        writeToPath(filePath, formattedValues, {headers: true})
+        writeToPath(filePath, formattedValues, {headers: true, delimiter: format === 'Raven' ? '\t' : ','})
         .on('error', err => UI.postMessage({event: 'generate-alert', message: `Cannot save file ${filePath}\nbecause it is open in another application`}))
         .on('finish', () => {
             UI.postMessage({event: 'generate-alert', message: filePath + ' has been written successfully.'});
@@ -2647,6 +2669,34 @@ async function formateBirdValues(obj) {
     newObj['Distance covered'] = '';
     newObj['Area covered'] = '';
     newObj['Submission Comments'] = 'Submission initially generated from Chirpity';
+    return newObj;
+}
+
+function formatRavenValues(obj) {
+    // Create a copy of the original object to avoid modifying it directly
+    const modifiedObj = { ...obj };
+
+    if (STATE.model === 'chirpity'){
+        // Regular expression to match the words inside parentheses
+        const regex = /\(([^)]+)\)/;
+        const matches = modifiedObj.cname.match(regex);
+        // Splitting the input string based on the regular expression match
+        const [name, calltype] = modifiedObj.cname.split(regex);
+        modifiedObj.cname = name.trim(); // Output: "words words"
+    }
+    // Create a new object with the right keys
+    const newObj = {};
+    newObj['Selection'] = modifiedObj.selection;
+    newObj['View'] = 'Spectrogram 1';
+    newObj['Channel'] = 1;
+    newObj['Begin Time (s)'] = modifiedObj.position + modifiedObj.offset;
+    newObj['End Time (s)'] = modifiedObj.end  + modifiedObj.offset;
+    newObj['Low Freq (Hz)'] = 0;
+    newObj['High Freq (Hz)'] = 15000;
+    newObj['Common Name'] = modifiedObj.cname;
+    newObj['Confidence'] = modifiedObj.score / 1000;
+    newObj['Begin Path'] = modifiedObj.file ;
+    newObj['File Offset (s)'] = modifiedObj.position;
     return newObj;
 }
 
@@ -3005,8 +3055,10 @@ const onUpdateFileStart = async (args) => {
     utimesSync(file, newfileMtime);
     metadata[file].fileStart = args.start;
     let db = STATE.db;
-    let row = await db.getAsync('SELECT id from files where name = ?', file);
-    let result;
+    let row = await db.getAsync(`
+        SELECT id, filestart, duration, locationID FROM files 
+        WHERE name = ?`, file);
+
     if (!row) {
         DEBUG && console.log('File not found in database, adding.');
         await db.runAsync('INSERT INTO files (id, name, duration, filestart) values (?, ?, ?, ?)', undefined, file, metadata[file].duration, args.start);
@@ -3017,7 +3069,66 @@ const onUpdateFileStart = async (args) => {
         const { changes } = await db.runAsync('UPDATE files SET filestart = ? where id = ?', args.start, id);
         DEBUG && console.log(changes ? `Changed ${file}` : `No changes made`);
         // Fill with new values
-        result = await db.runAsync('UPDATE records set dateTime = (position * 1000) + ? WHERE fileID = ?', args.start, id);
+
+        try {
+            // Begin transaction
+            await db.runAsync('BEGIN TRANSACTION');
+    
+            // Create a temporary table with the same structure as the records table
+            await db.runAsync(`
+                CREATE TEMPORARY TABLE temp_records AS
+                SELECT * FROM records;
+            `);
+    
+            // Update the temp_records table with the new filestart values
+            await db.runAsync('UPDATE temp_records SET dateTime = (position * 1000) + ? WHERE fileID = ?', args.start, id);
+                
+            // Drop the original records table
+            await db.runAsync('DROP TABLE records;');
+    
+            // Rename the temp_records table to replace the original records table
+            await db.runAsync('ALTER TABLE temp_records RENAME TO records;');
+    
+            // Recreate the UNIQUE constraint on the new records table
+            await db.runAsync(`
+                CREATE UNIQUE INDEX idx_unique_record ON records (dateTime, fileID, speciesID);
+            `);
+            
+            // Update the daylight flag if necessary
+            let lat, lon;
+            if (row.locationID){
+                const location = await db.getAsync('SELECT lat, lon FROM locations WHERE locationID = ?', row.locationID)
+                lat = location.lat;
+                lon = location.lon;
+            } else {
+                lat = STATE.lat;
+                lon = STATE.lon;
+            }
+            let changes = 0
+            db.each(`
+                SELECT rowid, dateTime, fileID, speciesID, confidence, isDaylight from records WHERE fileID = ${id}
+                `, async (err, row) => {
+                    if (err) {
+                        throw err;
+                    }
+                    const isDaylight = isDuringDaylight(row.dateTime, lat, lon) ? 1 : 0;
+                    // Update the isDaylight column for this record
+                    const result = await db.runAsync('UPDATE records SET isDaylight = ? WHERE isDaylight != ? AND rowid = ?', isDaylight, isDaylight, row.rowid);
+                    changes += result.changes
+                }, async (err, count) => {
+                    if (err) {
+                        throw err;
+                    }
+                    // Commit transaction once all rows are processed
+                    await db.run('COMMIT');
+                    DEBUG && console.log(`File ${file} updated successfully.`);
+                    await Promise.all([getResults(), getSummary()] );
+                });
+        } catch (error) {
+            // Rollback in case of error
+            await db.runAsync('ROLLBACK');
+            console.error(`Transaction failed: ${error.message}`);
+        }
     }
 };
 
@@ -3182,6 +3293,35 @@ async function onChartRequest(args) {
         pointStart: pointStart,
         aggregation: aggregation
     })
+}
+async function onFileUpdated(oldName, newName){
+    const newDuration = Math.round(await getDuration(newName));
+    try {
+        const result = await STATE.db.runAsync(`UPDATE files SET name = ? WHERE name = ? AND duration BETWEEN ? - 1 and ? + 1`, newName, oldName, newDuration, newDuration);
+        if (result.changes){
+            UI.postMessage({
+                event: 'generate-alert', message: 'The file location was successfully updated in the database. Refresh the results to see the records.'
+            });
+        } else {
+            UI.postMessage({
+                event: 'generate-alert', message: '<span class="text-danger">No changes made</span>. The selected file has a different duration to the original file.'
+            });
+        }
+    } catch (err) {
+        if (err.code === 'SQLITE_CONSTRAINT' && err.message.includes('UNIQUE')) {
+            // Unique constraint violation, show specific error message
+            UI.postMessage({
+                event: 'generate-alert', 
+                message: '<span class="text-danger">No changes made</span>. The selected file already exists in the database.'
+            });
+        } else {
+            // Other types of errors
+            UI.postMessage({
+                event: 'generate-alert', 
+                message: `<span class="text-danger">An error occurred while updating the file: ${err.message}</span>`
+            });
+        }
+    }
 }
 
 const onFileDelete = async (fileName) => {

@@ -205,6 +205,7 @@ const DOM = {
      resultTableElement: document.getElementById('resultTableContainer'),
      spectrogramWrapper: document.getElementById('spectrogramWrapper'),
      spectrogram: document.getElementById('spectrogram'),
+     specLabels: document.getElementById('spec-labels'),
      summaryTable: document.getElementById('summaryTable'),
      resultHeader: document.getElementById('resultsHead'),
      threadSlider: document.getElementById('thread-slider'),
@@ -495,7 +496,7 @@ function zoomSpec(direction) {
 }
 
 async function showOpenDialog(fileOrFolder) {
-    const files = await window.electron.openDialog('showOpenDialog', {type: 'audio', fileOrFolder: fileOrFolder});
+    const files = await window.electron.openDialog('showOpenDialog', {type: 'audio', fileOrFolder: fileOrFolder, multi: 'multiSelections'});
     if (!files.canceled) {
         if (fileOrFolder === 'openFiles'){
             await onOpenFiles({ filePaths: files.filePaths });
@@ -585,6 +586,7 @@ function showDatePicker() {
         
         // Send the data to the worker
         worker.postMessage({ action: 'update-file-start', file: currentFile, start: timestamp });
+        resetResults();
         fileStart = timestamp;
         // update the timeline
         postBufferUpdate({ file: currentFile, begin: bufferBegin })
@@ -1098,6 +1100,7 @@ async function batchExportAudio() {
 
 const export2CSV = ()  => exportData('text', isSpeciesViewFiltered(true), Infinity);
 const exporteBird = ()  => exportData('eBird', isSpeciesViewFiltered(true), Infinity);
+const exportRaven = ()  => exportData('Raven', isSpeciesViewFiltered(true), Infinity);
 
 async function exportData(format, species, limit, duration){
     const response = await window.electron.selectDirectory('selectDirectory');
@@ -1149,7 +1152,7 @@ exploreLink.addEventListener('click', async () => {
     locationFilter.addEventListener('change', handleLocationFilterChange);
     hideAll();
     showElement(['exploreWrapper'], false);
-    enableMenuItem(['saveCSV', 'save-eBird']);
+    enableMenuItem(['saveCSV', 'save-eBird', 'save-Raven']);
     worker.postMessage({ action: 'update-state', globalOffset: 0, filteredOffset: {}});
     // Analysis is done
     STATE.analysisDone = true;
@@ -1494,6 +1497,7 @@ const defaultConfig = {
     lastUpdateCheck: 0,
     UUID: uuidv4(),
     colormap: 'inferno',
+    specLabels: true,
     customColormap: {'loud': "#00f5d8", 'mid': "#000000", 'quiet': "#000000", 'threshold': 0.5, 'windowFn': 'hann'},
     timeOfDay: true,
     list: 'birds',
@@ -1596,6 +1600,8 @@ window.onload = async () => {
         DOM.timelineSetting.value = config.timeOfDay ? 'timeOfDay' : 'timecode';
         // Spectrogram colour
         DOM.colourmap.value = config.colormap;
+        // Spectrogram labels
+        DOM.specLabels.checked = config.specLabels;
         // Window function & colormap
         document.getElementById('window-function').value = config.customColormap.windowFn;
         config.colormap === 'custom' && document.getElementById('colormap-fieldset').classList.remove('d-none');
@@ -1732,7 +1738,16 @@ const setUpWorkerMessaging = () => {
                     }
                     if (args.file){
                         MISSING_FILE = args.file;
-                        args.message += `<p><b>Would you like to <a href="#" id="purge-from-toast">remove this file from the archive</b></p>`
+                        args.message += `
+                            <div class="d-flex justify-content-center mt-2">
+                                <button id="locate-missing-file" class="btn btn-secondary border-dark text-nowrap" style="--bs-btn-padding-y: .25rem;" type="button">
+                                    Locate File
+                                </button>
+                                <button id="purge-from-toast" class="ms-3 btn btn-danger text-nowrap" style="--bs-btn-padding-y: .25rem;" type="button">
+                                    Delete File
+                                </button>
+                            </div>
+                            `
                     }
                     generateToast({ message: args.message});
                 break;
@@ -2407,7 +2422,7 @@ function onChartData(args) {
             frequencyMax: 11_950,
             normalize: false,
             hideScrollbar: true,
-            labels: false,
+            labels: config.specLabels,
             height: height,
             fftSamples: fftSamples, 
             colorMap: colors
@@ -3117,9 +3132,9 @@ function onChartData(args) {
         // Why do we do audacity labels here?
         AUDACITY_LABELS = audacityLabels;
         if (! isEmptyObject(AUDACITY_LABELS)) {
-            enableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save2db', 'export2audio']);
+            enableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save-Raven', 'save2db', 'export2audio']);
         } else {
-            disableMenuItem(['saveLabels', 'saveCSV', 'save-eBird']);
+            disableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save-Raven']);
         }
         if (currentFile) enableMenuItem(['analyse'])
     }
@@ -3207,10 +3222,10 @@ function onChartData(args) {
     }
     
     
-    const checkDayNight = (timestamp) => {
-        let astro = SunCalc.getTimes(timestamp, config.latitude, config.longitude);
-        return (astro.dawn.setMilliseconds(0) < timestamp && astro.dusk.setMilliseconds(0) > timestamp) ? 'daytime' : 'nighttime';
-    }
+    // const checkDayNight = (timestamp) => {
+    //     let astro = SunCalc.getTimes(timestamp, config.latitude, config.longitude);
+    //     return (astro.dawn.setMilliseconds(0) < timestamp && astro.dusk.setMilliseconds(0) > timestamp) ? 'daytime' : 'nighttime';
+    // }
     
     // TODO: show every detection in the spec window as a region on the spectrogram
     
@@ -3267,9 +3282,10 @@ function onChartData(args) {
                 comment,
                 end,
                 count,
-                callCount
+                callCount,
+                isDaylight
             } = result;
-            const dayNight = checkDayNight(timestamp);
+            const dayNight = isDaylight ? 'daytime' : 'nighttime'; // checkDayNight(timestamp);
             if (dayNight === 'nighttime') seenTheDarkness = true;
             // Todo: move this logic so pre dark sections of file are not even analysed
             if (config.detect.nocmig && !selection && dayNight === 'daytime') return
@@ -4299,6 +4315,7 @@ DOM.gain.addEventListener('input', () => {
             case 'saveLabels': { showSaveDialog(); break }
             case 'saveCSV': { export2CSV(); break }
             case 'save-eBird': { exporteBird(); break }
+            case 'save-Raven': { exportRaven(); break }
             case 'export-audio': { exportAudio(); break }
             case 'exit': { exitApplication(); break }
 
@@ -4313,6 +4330,9 @@ DOM.gain.addEventListener('input', () => {
             case 'reanalyseAll': {postAnalyseMessage({ filesInScope: fileList, reanalyse: true }); break }
             
             case 'purge-from-toast': { deleteFile(MISSING_FILE); break }
+            case 'locate-missing-file': {
+                (async () => await locateFile(MISSING_FILE))(); 
+                break }
             case 'purge-file': { deleteFile(currentFile); break }
 
             case 'keyboardHelp': { (async () => await populateHelpModal('Help/keyboard.html', 'Keyboard shortcuts'))(); break }
@@ -4566,6 +4586,18 @@ DOM.gain.addEventListener('input', () => {
                     const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
                     fileLoaded &&
                         postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+                    break;
+                }
+                case 'spec-labels': {
+                    config.specLabels = element.checked;                    
+                    if (wavesurfer && currentFile) {
+                        // refresh caches
+                        updateElementCache()
+                        const fftSamples = wavesurfer.spectrogram.fftSamples;
+                        wavesurfer.destroy();
+                        wavesurfer = undefined;
+                        adjustSpecDims(true, fftSamples)
+                    }
                     break;
                 }
                 case 'normalise': {
@@ -4866,7 +4898,23 @@ async function readLabels(labelFile, updating){
         currentPage = currentPage ? parseInt(currentPage.textContent) : 1;
         return currentPage;
     }
-        
+
+    async function locateFile(file) {       
+        const files = await window.electron.openDialog('showOpenDialog', 
+            {type: 'audio', 
+                fileOrFolder: 'openFile', 
+                buttonLabel: 'Select File', 
+                title: `Select the file to replace ${file}`});
+        if (!files.canceled) {
+            worker.postMessage({
+                action: 'relocated-file',
+                originalFile: file,
+                updatedFile: files.filePaths[0]
+            })
+            renderFilenamePanel();
+        }
+}
+
     function deleteFile(file) {
         // EventHandler caller 
         if (typeof file === 'object' && file instanceof Event) {
