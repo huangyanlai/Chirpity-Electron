@@ -163,6 +163,10 @@ const bodyElement = document.body;
 let specElement, waveElement, specCanvasElement, specWaveElement;
 let waveCanvasElement, waveWaveElement;
 const DOM = {
+    fromSlider: document.getElementById('fromSlider'),
+    toSlider: document.getElementById('toSlider'),
+    fromInput: document.getElementById('fromInput'),
+    toInput: document.getElementById('toInput'),
      audioBitrate: document.getElementById('bitrate'),
      audioBitrateContainer: document.getElementById('bitrate-container'),
      audioDownmix: document.getElementById('downmix'),
@@ -454,6 +458,24 @@ function updateElementCache() {
     specWaveElement = document.querySelector('#spectrogram wave');
 }
 
+function increaseFFT(){
+    if (wavesurfer.spectrogram.fftSamples <= 4096) {
+        wavesurfer.spectrogram.fftSamples *= 2;
+        const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+        console.log(wavesurfer.spectrogram.fftSamples);
+    }
+}
+
+function reduceFFT(){
+    if (wavesurfer.spectrogram.fftSamples > 64) {
+        wavesurfer.spectrogram.fftSamples /= 2;
+        const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+        console.log(wavesurfer.spectrogram.fftSamples);
+    }
+}
+
 function zoomSpec(direction) {
     if (fileLoaded) {
         if (typeof direction !== 'string') { // then it's an event
@@ -636,7 +658,7 @@ function renderFilenamePanel() {
         <span class="filename ${isSaved}">${label}</span>
         </button>
         <button class="btn btn-dark dropdown-toggle dropdown-toggle-split" type="button" 
-        data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+        data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">+${files.length -1}
         <span class="visually-hidden">Toggle Dropdown</span>
         </button>
         <div class="dropdown-menu dropdown-menu-dark" aria-labelledby="dropdownMenuButton">`;
@@ -1291,8 +1313,8 @@ function adjustSpecDims(redraw, fftSamples) {
                 });
             } else {
                 wavesurfer.setHeight(specHeight);
+                initSpectrogram(specHeight, fftSamples);
             }
-            initSpectrogram(specHeight, fftSamples);
             specCanvasElement.style.width = '100%';
             specElement.style.zIndex = 0;
             //document.querySelector('.spec-labels').style.width = '55px';
@@ -1498,6 +1520,8 @@ const defaultConfig = {
     UUID: uuidv4(),
     colormap: 'inferno',
     specLabels: true,
+    minFrequency: 0,
+    maxFrequency: 11950,
     customColormap: {'loud': "#00f5d8", 'mid': "#000000", 'quiet': "#000000", 'threshold': 0.5, 'windowFn': 'hann'},
     timeOfDay: true,
     list: 'birds',
@@ -1602,6 +1626,15 @@ window.onload = async () => {
         DOM.colourmap.value = config.colormap;
         // Spectrogram labels
         DOM.specLabels.checked = config.specLabels;
+        // Spectrogram frequencies
+        DOM.fromInput.value = config.minFrequency;
+        DOM.fromSlider.value = config.minFrequency;
+        DOM.toInput.value = config.maxFrequency;
+        DOM.toSlider.value = config.maxFrequency;
+        fillSlider(DOM.fromInput, DOM.toInput,  '#C6C6C6', '#0d6efd', DOM.toSlider)
+        if (config.minFrequency > 0 || config.maxFrequency < 11950) {
+            document.getElementById('frequency-range').classList.add('text-warning');
+        }
         // Window function & colormap
         document.getElementById('window-function').value = config.customColormap.windowFn;
         config.colormap === 'custom' && document.getElementById('colormap-fieldset').classList.remove('d-none');
@@ -1969,10 +2002,6 @@ function getSpecies(target) {
     const callType = match[2] || null;     // Text inside the brackets, or null if no brackets
     return [species, callType];
 }
-
-
-
-const getDetectionContext = (target) => target.closest('table').id;
 
 
 function handleGesture(event) {
@@ -2356,7 +2385,8 @@ function onChartData(args) {
     }
     
     function handleKeyDown(e) {
-        let action = e.code;
+        let action = e.key;
+        config.debug && console.log(`${action} key pressed`);
         if (action in GLOBAL_ACTIONS) {
             contextMenu.classList.add("d-none");
             if (document === e.target || document.body === e.target || e.target.attributes["data-action"]) {}
@@ -2418,8 +2448,8 @@ function onChartData(args) {
             scrollParent: false,
             fillParent: true,
             windowFunc: config.customColormap.windowFn,
-            frequencyMin: 0,
-            frequencyMax: 11_950,
+            frequencyMin: config.minFrequency,
+            frequencyMax: config.maxFrequency,
             normalize: false,
             hideScrollbar: true,
             labels: config.specLabels,
@@ -2435,7 +2465,9 @@ function onChartData(args) {
     };
     function specTooltip(event) {
         const waveElement = event.target;
-        const yPosition = Math.round(((waveElement.getBoundingClientRect().bottom - event.clientY) * (11950 / waveElement.getBoundingClientRect().height))/10) * 10;
+        const specDimensions = waveElement.getBoundingClientRect();
+        const frequencyRange = Number(config.maxFrequency) - Number(config.minFrequency);
+        const yPosition = Math.round((specDimensions.bottom - event.clientY) * (frequencyRange / specDimensions.height)) + Number(config.minFrequency);
         tooltip.textContent = `Frequency: ${yPosition}Hz`;
         if (region) tooltip.innerHTML += "<br>" + formatRegionTooltip(region.start, region.end)
         tooltip.style.top = `${event.clientY}px`;
@@ -2572,15 +2604,9 @@ function onChartData(args) {
     /////////// Keyboard Shortcuts  ////////////
       
     const GLOBAL_ACTIONS = { // eslint-disable-line
-        KeyA: async function (e) {
-            if ( e.ctrlKey || e.metaKey) {
-                if (currentFile) {
-                    if (e.shiftKey) document.getElementById('analyseAll').click();
-                    else document.getElementById('analyse').click()
-                }
-            }
-        },
-        KeyC: function (e) {
+        a: function (e) { ( e.ctrlKey || e.metaKey) && currentFile && document.getElementById('analyse').click()},
+        A: function (e) { ( e.ctrlKey || e.metaKey) && currentFile && document.getElementById('analyseAll').click()},
+        c: function (e) {
             // Center window on playhead
             if (( e.ctrlKey || e.metaKey) && currentBuffer) {
                 const saveBufferBegin = bufferBegin;
@@ -2599,36 +2625,36 @@ function onChartData(args) {
                 postBufferUpdate({ begin: bufferBegin, position: 0.5, region: region, goToRegion: false})
             }
         },
-        KeyD: function (e) {
-            if (( e.ctrlKey || e.metaKey) && e.shiftKey) worker.postMessage({ action: 'create-dataset' });
-        },
-        KeyE: function (e) {
+        // D: function (e) {
+        //     if (( e.ctrlKey || e.metaKey)) worker.postMessage({ action: 'create-dataset' });
+        // },
+        e: function (e) {
             if (( e.ctrlKey || e.metaKey) && region) exportAudio();
         },
-        KeyF: function (e) {
+        f: function (e) {
             if ( e.ctrlKey || e.metaKey) toggleFullscreen();
         },
-        KeyG: function (e) {
+        g: function (e) {
             if ( e.ctrlKey || e.metaKey) showGoToPosition();
         },
-        KeyO: async function (e) {
+        o: async function (e) {
             if ( e.ctrlKey || e.metaKey) await showOpenDialog('openFile');
         },
-        KeyP: function () {
+        p: function () {
             (typeof region !== 'undefined') ? region.play() : console.log('Region undefined')
         },
-        KeyQ: function (e) {
+        q: function (e) {
             e.metaKey && isMac && window.electron.exitApplication()
         },
-        KeyS: function (e) {
+        s: function (e) {
             if ( e.ctrlKey || e.metaKey) {
                 worker.postMessage({ action: 'save2db', file: currentFile});
             }
         },
-        KeyT: function (e) {
+        t: function (e) {
             if ( e.ctrlKey || e.metaKey) timelineToggle(true);
         },
-        KeyV: function(e) {
+        v: function(e) {
             if (activeRow && (e.ctrlKey || e.metaKey)) {
                 const nameAttribute = activeRow.getAttribute('name');
                 const [file, start, end, sname, label] = nameAttribute.split('|');
@@ -2636,7 +2662,7 @@ function onChartData(args) {
                 insertManualRecord(cname, parseFloat(start), parseFloat(end), "", "", "", "Update", false, cname)
             }
         },
-        KeyZ: function (e) {
+        z: function (e) {
             if (( e.ctrlKey || e.metaKey) && DELETE_HISTORY.length) insertManualRecord(...DELETE_HISTORY.pop());
         },
         Escape: function (e) {
@@ -2720,57 +2746,10 @@ function onChartData(args) {
                 }
             }
         },
-        Equal: function (e) {
-            if (e.shiftKey) {
-                if (wavesurfer.spectrogram.fftSamples > 64) {
-                    wavesurfer.spectrogram.fftSamples /= 2;
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                    postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    console.log(wavesurfer.spectrogram.fftSamples);
-                }
-            } else {
-                zoomSpec('zoomIn')
-            }
-        },
-        NumpadAdd: function (e) {
-            if (e.shiftKey) {
-                if (wavesurfer.spectrogram.fftSamples > 64) {
-                    wavesurfer.spectrogram.fftSamples /= 2;
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                    postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    console.log(wavesurfer.spectrogram.fftSamples);
-                }
-            } else {
-                zoomSpec('zoomIn')
-            }
-        },
-        Minus: function (e) {
-            if (e.shiftKey) {
-                if (wavesurfer.spectrogram.fftSamples <= 4096) {
-                    wavesurfer.spectrogram.fftSamples *= 2;
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                    postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    console.log(wavesurfer.spectrogram.fftSamples);
-                }
-            } else {
-                zoomSpec('zoomOut')
-            }
-        },
-        NumpadSubtract: function (e) {
-            if (e.shiftKey) {
-                if (wavesurfer.spectrogram.fftSamples <= 4096) {
-                    wavesurfer.spectrogram.fftSamples *= 2;
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                    postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    console.log(wavesurfer.spectrogram.fftSamples);
-                }
-            } else {
-                zoomSpec('zoomOut')
-            }
-        },
-        Space: function () {
-            if (wavesurfer) wavesurfer.playPause();
-        },
+        '=': function (e) {e.metaKey || e.ctrlKey ? reduceFFT() : zoomSpec('zoomIn')},
+        '+': function (e) {e.metaKey || e.ctrlKey ? reduceFFT() : zoomSpec('zoomIn')},
+        '-': function (e) {e.metaKey || e.ctrlKey ? increaseFFT() : zoomSpec('zoomOut')},
+        ' ': function () { wavesurfer && wavesurfer.playPause() },
         Tab: function (e) {
             if (activeRow) {
                 if (e.shiftKey) {
@@ -2786,12 +2765,8 @@ function onChartData(args) {
                 if (!activeRow.classList.contains('text-bg-dark')) activeRow.click();
             }
         },
-        Delete: function () {
-            if (activeRow) deleteRecord(activeRow);
-        },
-        Backspace: function () {
-            if (activeRow) deleteRecord(activeRow);
-        },
+        Delete: function () {activeRow && deleteRecord(activeRow)},
+        Backspace: function () {activeRow && deleteRecord(activeRow)}
     };
     
     //returns a region object with the start and end of the region supplied
@@ -4366,6 +4341,22 @@ DOM.gain.addEventListener('input', () => {
                 }
                 break;
             }
+            case 'reset-spec-frequency': {
+                config.minFrequency = 0;
+                config.maxFrequency = 11950;
+                DOM.fromInput.value = config.minFrequency;
+                DOM.fromSlider.value = config.minFrequency;
+                DOM.toInput.value = config.maxFrequency;
+                DOM.toSlider.value = config.maxFrequency;
+                fillSlider(DOM.fromInput, DOM.toInput,  '#C6C6C6', '#0d6efd', DOM.toSlider)
+                const fftSamples = wavesurfer.spectrogram.fftSamples;
+                wavesurfer.destroy();
+                wavesurfer = undefined;
+                adjustSpecDims(true, fftSamples);
+                document.getElementById('frequency-range').classList.remove('text-warning');
+                updatePrefs('config.json', config);
+                break;
+            }
             case 'speciesFilter': { speciesFilter(e); break}
             case 'context-menu': { 
                 e.target.closest('.play') && typeof region !== 'undefined' ? region.play() : console.log('Region undefined')
@@ -4373,6 +4364,10 @@ DOM.gain.addEventListener('input', () => {
             }
             case 'audioFiltersIcon': { toggleFilters(); break }
             case 'context-mode': { toggleContextAwareMode(); break }
+            case 'frequency-range': { 
+                document.getElementById('frequency-range-panel').classList.toggle('d-none');
+                document.getElementById('frequency-range').classList.toggle('active');
+                break }
             case 'nocmigMode': { changeNocmigMode(); break }
             case 'fullscreen': { toggleFullscreen(); break}
 
@@ -4411,6 +4406,10 @@ DOM.gain.addEventListener('input', () => {
             case 'context-xc': { getXCComparisons(); break}
         }
         contextMenu.classList.add("d-none");
+        if (target !=  'frequency-range' && !e.target.closest('#frequency-range-panel')){
+            document.getElementById('frequency-range-panel').classList.add('d-none');
+            document.getElementById('frequency-range').classList.remove('active');
+        } 
         hideConfidenceSlider();
         config.debug && console.log('clicked', target);
         target && target !== 'result1' && trackEvent(config.UUID, 'UI', 'Click', target);
@@ -4597,6 +4596,38 @@ DOM.gain.addEventListener('input', () => {
                         wavesurfer.destroy();
                         wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
+                    }
+                    break;
+                }
+                case 'fromInput':
+                case 'fromSlider': {
+                    config.minFrequency = Math.max(element.valueAsNumber, 0);
+                    DOM.fromInput.value = config.minFrequency;
+                    DOM.fromSlider.value = config.minFrequency;
+                    const fftSamples = wavesurfer.spectrogram.fftSamples;
+                    wavesurfer.destroy();
+                    wavesurfer = undefined;
+                    adjustSpecDims(true, fftSamples);
+                    if (config.minFrequency > 0 || config.maxFrequency < 11950) {
+                        document.getElementById('frequency-range').classList.add('text-warning');
+                    } else {
+                       document.getElementById('frequency-range').classList.remove('text-warning');
+                    }
+                    break;
+                }
+                case 'toInput':
+                case 'toSlider': {
+                    config.maxFrequency = Math.min(element.valueAsNumber, 11950);
+                    DOM.toInput.value = config.maxFrequency;
+                    DOM.toSlider.value = config.maxFrequency;
+                    const fftSamples = wavesurfer.spectrogram.fftSamples;
+                    wavesurfer.destroy();
+                    wavesurfer = undefined;
+                    adjustSpecDims(true, fftSamples);
+                    if (config.minFrequency > 0 || config.maxFrequency < 11950) {
+                        document.getElementById('frequency-range').classList.add('text-warning');
+                    } else {
+                        document.getElementById('frequency-range').classList.remove('text-warning');
                     }
                     break;
                 }

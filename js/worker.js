@@ -544,12 +544,14 @@ async function spawnListWorker() {
 const getFiles = async (files, image) => {
     let file_list = [];
     for (let i = 0; i < files.length; i++) {
-        const stats = fs.lstatSync(files[i])
+        const path = files[i];
+        const stats = fs.lstatSync(path)
         if (stats.isDirectory()) {
-            const dirFiles = await getFilesInDirectory(files[i])
+            const dirFiles = await getFilesInDirectory(path)
             file_list = [...file_list,...dirFiles]
         } else {
-            file_list.push(files[i])
+            const filename = p.basename(path)
+            filename.startsWith('._') || file_list.push(path)
         }
     }
     // filter out unsupported files
@@ -577,7 +579,8 @@ const getFilesInDirectory = async (dir) => {
             if (dirent.isDirectory()) {
                 stack.push(path);
             } else {
-                files.push(path);
+                const filename = p.basename(path)
+                filename.startsWith('._') || files.push(path)
             }
         }
     }
@@ -1054,7 +1057,9 @@ const setMetadata = async ({ file, proxy = file, source_file = file }) => {
     // using the nullish coalescing operator
     metadata[file].locationID ??= savedMeta?.locationID;
     
-    metadata[file].duration ??= savedMeta?.duration || await getDuration(file).catch(error => console.warn('getDuration error', error));
+    metadata[file].duration ??= savedMeta?.duration || await getDuration(file).catch(error => {
+        console.warn('getDuration error', error)}
+    );
     
     return new Promise((resolve, reject) => {
         if (metadata[file].isComplete) {
@@ -2881,11 +2886,11 @@ const getMostCalls = (species) => {
         FROM records 
         JOIN species on species.id = records.speciesID
         JOIN files ON files.id = records.fileID
-        WHERE species.cname = '${prepSQL(species)}' ${locationFilter}
+        WHERE species.cname = ? ${locationFilter}
         GROUP BY STRFTIME('%Y', DATETIME(dateTime/1000, 'unixepoch', 'localtime')),
         STRFTIME('%W', DATETIME(dateTime/1000, 'unixepoch', 'localtime')),
         STRFTIME('%d', DATETIME(dateTime/1000, 'unixepoch', 'localtime'))
-        ORDER BY count DESC LIMIT 1`, (err, row) => {
+        ORDER BY count DESC LIMIT 1`, species, (err, row) => {
             if (err) {
                 reject(err)
             } else {
@@ -2938,9 +2943,9 @@ const getChartTotals = ({
         FROM records
         JOIN species ON species.id = speciesID
         JOIN files ON files.id = fileID
-        WHERE species.cname = '${species}' ${dateFilter} ${locationFilter}
+        WHERE species.cname = ? ${dateFilter} ${locationFilter}
         GROUP BY ${groupBy}
-        ORDER BY ${orderBy};`, (err, rows) => {
+        ORDER BY ${orderBy}`, species, (err, rows) => {
             if (err) {
                 reject(err)
             } else {
@@ -2961,8 +2966,8 @@ const getRate = (species) => {
         from records
         JOIN species ON species.id = records.speciesID
         JOIN files ON files.id = records.fileID
-        WHERE species.cname = '${species}' ${locationFilter}
-        group by week;`, (err, rows) => {
+        WHERE species.cname = ? ${locationFilter}
+        group by week;`, species, (err, rows) => {
             for (let i = 0; i < rows.length; i++) {
                 calls[parseInt(rows[i].week) - 1] = rows[i].calls;
             }
@@ -3051,8 +3056,8 @@ const getValidSpecies = async (file) => {
 
 const onUpdateFileStart = async (args) => {
     let file = args.file;
-    const newfileMtime = Math.round(args.start + (metadata[file].duration * 1000));
-    utimesSync(file, newfileMtime);
+    const newfileMtime = new Date(Math.round(args.start + (metadata[file].duration * 1000)));
+    utimesSync(file, {atime: Date.now(), mtime: newfileMtime});
     metadata[file].fileStart = args.start;
     let db = STATE.db;
     let row = await db.getAsync(`
@@ -3068,62 +3073,70 @@ const onUpdateFileStart = async (args) => {
         const id = row.id;
         const { changes } = await db.runAsync('UPDATE files SET filestart = ? where id = ?', args.start, id);
         DEBUG && console.log(changes ? `Changed ${file}` : `No changes made`);
-        // Fill with new values
 
         try {
             // Begin transaction
             await db.runAsync('BEGIN TRANSACTION');
-    
+
             // Create a temporary table with the same structure as the records table
             await db.runAsync(`
-                CREATE TEMPORARY TABLE temp_records AS
+                CREATE TABLE temp_records AS
                 SELECT * FROM records;
             `);
-    
+
             // Update the temp_records table with the new filestart values
             await db.runAsync('UPDATE temp_records SET dateTime = (position * 1000) + ? WHERE fileID = ?', args.start, id);
-                
-            // Drop the original records table
-            await db.runAsync('DROP TABLE records;');
-    
+
+            // Check if temp_records exists and drop the original records table
+            const tempExists = await db.getAsync(`SELECT name FROM sqlite_master WHERE type='table' AND name='temp_records';`);
+
+            if (tempExists) {
+                // Drop the original records table
+                await db.runAsync('DROP TABLE records;');
+            }
+
             // Rename the temp_records table to replace the original records table
             await db.runAsync('ALTER TABLE temp_records RENAME TO records;');
-    
+
             // Recreate the UNIQUE constraint on the new records table
             await db.runAsync(`
                 CREATE UNIQUE INDEX idx_unique_record ON records (dateTime, fileID, speciesID);
             `);
-            
+
             // Update the daylight flag if necessary
             let lat, lon;
-            if (row.locationID){
-                const location = await db.getAsync('SELECT lat, lon FROM locations WHERE locationID = ?', row.locationID)
+            if (row.locationID) {
+                const location = await db.getAsync('SELECT lat, lon FROM locations WHERE locationID = ?', row.locationID);
                 lat = location.lat;
                 lon = location.lon;
             } else {
                 lat = STATE.lat;
                 lon = STATE.lon;
             }
-            let changes = 0
+
+            // Collect updates to be performed on each record
+            const updatePromises = [];
+
             db.each(`
-                SELECT rowid, dateTime, fileID, speciesID, confidence, isDaylight from records WHERE fileID = ${id}
-                `, async (err, row) => {
-                    if (err) {
-                        throw err;
-                    }
-                    const isDaylight = isDuringDaylight(row.dateTime, lat, lon) ? 1 : 0;
-                    // Update the isDaylight column for this record
-                    const result = await db.runAsync('UPDATE records SET isDaylight = ? WHERE isDaylight != ? AND rowid = ?', isDaylight, isDaylight, row.rowid);
-                    changes += result.changes
-                }, async (err, count) => {
-                    if (err) {
-                        throw err;
-                    }
-                    // Commit transaction once all rows are processed
-                    await db.run('COMMIT');
-                    DEBUG && console.log(`File ${file} updated successfully.`);
-                    await Promise.all([getResults(), getSummary()] );
-                });
+                SELECT rowid, dateTime, fileID, speciesID, confidence, isDaylight FROM records WHERE fileID = ${id}
+            `, async (err, row) => {
+                if (err) {
+                    throw err; // This will trigger rollback
+                }
+                const isDaylight = isDuringDaylight(row.dateTime, lat, lon) ? 1 : 0;
+                // Update the isDaylight column for this record
+                updatePromises.push(db.runAsync('UPDATE records SET isDaylight = ? WHERE isDaylight != ? AND rowid = ?', isDaylight, isDaylight, row.rowid));
+            }, async (err, count) => {
+                if (err) {
+                    throw err; // This will trigger rollback
+                }
+                // Wait for all updates to finish
+                await Promise.all(updatePromises);
+                // Commit transaction once all rows are processed
+                await db.runAsync('COMMIT');
+                DEBUG && console.log(`File ${file} updated successfully.`);
+                await Promise.all([getResults(), getSummary()]);
+            });
         } catch (error) {
             // Rollback in case of error
             await db.runAsync('ROLLBACK');
@@ -3245,7 +3258,6 @@ async function onChartRequest(args) {
         
         DEBUG && console.log(`Most calls  chart generation took ${(Date.now() - t0) / 1000} seconds`)
         t0 = Date.now();
-        args.species = prepSQL(args.species);
     }
     const [dataPoints, aggregation] = await getChartTotals(args)
     .then(([rows, dataPoints, aggregation, startDay]) => {
