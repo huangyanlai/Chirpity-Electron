@@ -133,6 +133,9 @@ function parseCname(cname){
     } else if (cname.endsWith(' (song)')) {
         callType = 3;
         cname = cname.slice(0, -7); // Remove the last 7 characters (length of ' (song)')
+    } else if (cname.endsWith(' (booming)')) {
+        callType = 4;
+        cname = cname.slice(0, -10); // Remove the last 10 characters (length of ' (booming)')
     }
     return [cname, callType];
 }
@@ -153,7 +156,7 @@ const createDB = async (file) => {
     const db = archiveMode ? diskDB : memoryDB;
     await db.runAsync('BEGIN');
     await db.runAsync('CREATE TABLE calls (id INTEGER PRIMARY KEY, callType TEXT)');
-    await db.runAsync('INSERT INTO calls VALUES (0, NULL), (1, "call"), (2, "flight call"), (3, "song")');
+    await db.runAsync('INSERT INTO calls VALUES (0, NULL), (1, "call"), (2, "flight call"), (3, "song"), (4, "booming")');
     await db.runAsync('CREATE TABLE species(id INTEGER PRIMARY KEY, sname TEXT NOT NULL, cname TEXT NOT NULL, call_id INTEGER, UNIQUE (sname, call_id), CONSTRAINT fk_calltype FOREIGN KEY (call_id) REFERENCES calls(id))');
     await db.runAsync(`CREATE TABLE files(id INTEGER PRIMARY KEY, name TEXT,duration  REAL,filestart INTEGER, locationID INTEGER, UNIQUE (name))`);
     await db.runAsync(`CREATE TABLE locations( id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon  REAL NOT NULL, place TEXT NOT NULL, UNIQUE (lat, lon))`);
@@ -169,7 +172,7 @@ const createDB = async (file) => {
         const [common, callType] = parseCname(cname);
         // We do this to ensure the index starts with 0
         await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', i, sname, common, callType);
-        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${index}, ${sname}, ${common}, ${callType})`)
+        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${i}, ${sname}, ${common}, ${callType})`)
     }
     if (! archiveMode){
         await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
