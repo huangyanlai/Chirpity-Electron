@@ -1,3 +1,8 @@
+:root {
+    --font-size-scale: 1; /* Default scale */
+}
+
+
 html,
 body {
     height: 100%;
@@ -5,7 +10,8 @@ body {
     padding-bottom: 0;
     min-width: 700px;
     overflow: hidden;
-    background: #f8f9fa;
+    background: #d0d0d0;
+    font-size: calc(16px * var(--font-size-scale));
 }
 
 .overlay {
@@ -39,7 +45,7 @@ body {
   'GRAD' 0,
   'opsz' 24;
   font-display: block;
-  font-size: x-large;
+  font-size: calc(24px * var(--font-size-scale));
   display: inline-block;
   line-height: 1;
   white-space: nowrap;
@@ -65,15 +71,27 @@ body {
     width: 55px !important;
 }
 
+#primaryLogo {
+    max-height: calc(40px * var(--font-size-scale));
+    max-width: auto;
+}
+
 .icon {
-    max-height: 30px;
-    max-width: 30px;
+    max-height: calc(30px * var(--font-size-scale));
+    max-width: calc(30px * var(--font-size-scale));
     filter: invert(45%);
 
 }
 
 #list-icon:hover>img {
     filter: invert(100%);
+}
+
+img {
+    img {
+        width: calc(100 * var(--font-size-scale)); /* Scale width */
+        height: auto; /* Maintain aspect ratio */
+    }
 }
 
 span[id^="filename_"] {
@@ -93,11 +111,15 @@ span[id^="filename_"] {
     cursor: pointer;
 }
 
+#controlsWrapper {
+    cursor: move;
+}
+
 #controlsWrapper .row,
 #transport-controls {
     min-width: 850px;
     white-space: nowrap;
-    height: 40px;
+    height: calc(40px * var(--font-size-scale));
     z-index: 9;
 }
 
@@ -106,7 +128,7 @@ div#contentWrapper {
     background: #dbe2ed url(../img/Redwing-flight.png);
     background-size: cover;
     position: absolute;
-    top: 56px;
+    top: calc(56px * var(--font-size-scale));
     width: 100%;
     opacity: 0;
     transition: opacity 2.5s ease;
@@ -118,7 +140,7 @@ div#contentWrapper.loaded {
 }
 
 .zoom {
-    font-size: xx-large;
+    font-size: calc(32px * var(--font-size-scale));;
 }
 
 .species-selector {
@@ -297,7 +319,7 @@ region.wavesurfer-region[data-region-highlight] {
 footer {
     position: absolute;
     bottom: 0;
-    height: 30px;
+    height: calc(30px * var(--font-size-scale));
     text-align: center;
     width: 100%;
     z-index: 1000;
@@ -561,14 +583,14 @@ input[type="range"].vertical {
     animation-duration: 2.8s; /* Adjust the duration as needed */
   }
 .circle {
-    width: 20px;
-    height: 20px;
+    width: calc(20px * var(--font-size-scale));
+    height: calc(20px * var(--font-size-scale));
     border-radius: 50%;
     font-size: medium;
     background-color: gray;
     color: white;
     text-align: center;
-    line-height: 20px;
+    line-height: calc(20px * var(--font-size-scale));
     float: right;
     text-decoration: none; /* Remove underline from <a> tags */
     transition: transform 0.2s; /* Add transition for smooth scaling */
@@ -613,7 +635,7 @@ input[type="range"].vertical {
 
 #chartRange,
 #exploreRange {
-    min-height: 58px;
+    min-height: calc(58px * var(--font-size-scale));;
     width: 100%;
     max-width: 400px;
 }
@@ -645,7 +667,7 @@ input[type="range"].vertical {
 
 #update-progress-bar {
     width: 100%;
-    height: 10px;
+    height: calc(10px * var(--font-size-scale));
     border: 1px solid #ccc;
     border-radius: 5px;
     overflow: hidden;
@@ -733,7 +755,7 @@ input[type="range"].vertical {
   .range_container input[type="range"] {
     -webkit-appearance: none; 
     appearance: none;
-    height: 8px;
+    height: calc(8px * var(--font-size-scale));
     width: 100%;
     position: absolute;
     background-color: #C6C6C6;

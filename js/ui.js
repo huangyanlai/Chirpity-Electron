@@ -182,6 +182,7 @@ const DOM = {
      batchSizeValue: document.getElementById('batch-size-value'),
      colourmap: document.getElementById('colourmap'),
      contentWrapperElement: document.getElementById('contentWrapper'),
+     controlsWrapper: document.getElementById('controlsWrapper'),
      contextAware: document.getElementById('context'),
      contextAwareIcon: document.getElementById('context-mode'),
      debugMode: document.getElementById('debug-mode'),
@@ -222,6 +223,34 @@ clickedIndex, currentFileDuration;
 let currentBuffer, bufferBegin = 0, windowLength = 20;  // seconds
 // Set content container height
 DOM.contentWrapperElement.style.height = (bodyElement.clientHeight - 80) + 'px';
+
+// Mouse down event to start dragging
+DOM.controlsWrapper.addEventListener('mousedown', (e) => {
+    if (e.target.tagName !== 'DIV' ) return
+    const startY = e.clientY;
+    const initialHeight = DOM.spectrogram.offsetHeight;
+    let debounceTimer;
+    const onMouseMove = (e) => {
+        clearTimeout(debounceTimer);
+        // Calculate the delta y (drag distance)
+        const newHeight = initialHeight + e.clientY - startY;
+    
+        // Adjust the spectrogram dimensions accordingly
+        debounceTimer = setTimeout(() => {
+            adjustSpecDims(true,  wavesurfer.spectrogram.fftSamples, newHeight);
+        }, 5);
+    }
+    
+    // Remove event listeners on mouseup
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+    };
+    // Attach event listeners for mousemove and mouseup
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+});
+
 
 
 // Set default Options
@@ -1285,9 +1314,11 @@ const loadResultRegion = ({ file = '', start = 0, end = 3, label = '' } = {}) =>
 * @param redraw boolean, whether to re-render the spectrogram
 * @param fftSamples: Optional, the number of fftsamples to use for rendering. Must be a factor of 2
 */
-const footerHeight = document.getElementById('footer').offsetHeight;
-const navHeight = document.getElementById('navPadding').offsetHeight;
-function adjustSpecDims(redraw, fftSamples) {
+
+function adjustSpecDims(redraw, fftSamples, newHeight) {
+    const footerHeight = document.getElementById('footer').offsetHeight;
+    const navHeight = document.getElementById('navPadding').clientHeight;
+    newHeight ??= 0;
     //Contentwrapper starts below navbar (66px) and ends above footer (30px). Hence - 96
     const contentWrapper = document.getElementById('contentWrapper');
     contentWrapper.style.height = (bodyElement.clientHeight - footerHeight - navHeight) + 'px';
@@ -1298,18 +1329,19 @@ function adjustSpecDims(redraw, fftSamples) {
     const spectrogramWrapper = document.getElementById('spectrogramWrapper')
     if (!spectrogramWrapper.classList.contains('d-none')) {
         // Expand up to 512px unless fullscreen
-        const controlsHeight = document.getElementById('controlsWrapper').offsetHeight;
+        const controlsHeight = DOM.controlsWrapper.offsetHeight;
         const timelineHeight = 22 ; //document.getElementById('timeline').offsetHeight; // This is unset when there is no wavesurfer, so hard-coding
-        const specHeight = config.fullscreen ? contentHeight - timelineHeight - formOffset - controlsHeight : Math.min(contentHeight * 0.4, 512);
+        const specHeight = config.fullscreen ? contentHeight - timelineHeight - formOffset - controlsHeight : newHeight || config.specMaxHeight;
+        if (newHeight !== 0) {
+            config.specMaxHeight = specHeight;
+            scheduler.postTask(() => updatePrefs('config.json', config), {priority: 'background'});
+        }
         if (currentFile) {
             // give the wrapper space for the transport controls and element padding/margins
             if (!wavesurfer) {
                 initWavesurfer({
                     audio: currentBuffer,
-                    backend: 'WebAudio',
-                    alpha: 0,
                     height: specHeight,
-                    reset: false
                 });
             } else {
                 wavesurfer.setHeight(specHeight);
@@ -1328,6 +1360,22 @@ function adjustSpecDims(redraw, fftSamples) {
     const resultTableElement = document.getElementById('resultTableContainer');
     resultTableElement.style.height = (contentHeight - specOffset - formOffset) + 'px';
 }
+
+///////////////// Font functions ////////////////
+    // Function to set the font size scale
+    function setFontSizeScale() {
+        document.documentElement.style.setProperty('--font-size-scale', config.fontScale);
+        const decreaseBtn = document.getElementById('decreaseFont');
+        const increaseBtn = document.getElementById('increaseFont');
+        
+        decreaseBtn.classList.toggle('disabled', config.fontScale === 0.7);
+        increaseBtn.classList.toggle('disabled', config.fontScale === 1.1);
+
+        updatePrefs('config.json', config)
+    }
+
+
+
 
 
 ///////////////////////// Timeline Callbacks /////////////////////////
@@ -1515,13 +1563,13 @@ function fillDefaults(config, defaultConfig) {
 /////////////////////////  Window Handlers ////////////////////////////
 // Set config defaults
 const defaultConfig = {
+    fontScale: 1,
     seenTour: false,
     lastUpdateCheck: 0,
     UUID: uuidv4(),
     colormap: 'inferno',
+    specMaxHeight: 512,
     specLabels: true,
-    minFrequency: 0,
-    maxFrequency: 11950,
     customColormap: {'loud': "#00f5d8", 'mid': "#000000", 'quiet': "#000000", 'threshold': 0.5, 'windowFn': 'hann'},
     timeOfDay: true,
     list: 'birds',
@@ -1543,7 +1591,8 @@ const defaultConfig = {
     tensorflow: { threads: DIAGNOSTICS['Cores'], batchSize: 32 },
     webgpu: { threads: 2, batchSize: 8 },
     webgl: { threads: 2, batchSize: 32 },
-    audio: { gain: 0, format: 'mp3', bitrate: 192, quality: 5, downmix: false, padding: false, fade: false, notification: true, normalise: false },
+    audio: { gain: 0, format: 'mp3', bitrate: 192, quality: 5, downmix: false, padding: false, 
+        fade: false, notification: true, normalise: false, minFrequency: 0, maxFrequency: 11950 },
     limit: 500,
     track: true,
     debug: false,
@@ -1594,7 +1643,8 @@ window.onload = async () => {
         // Initialize Spectrogram
         initWavesurfer({});
         // Set UI option state
-        
+        // Fontsize
+        config.fontScale === 1 || setFontSizeScale();
         // Map slider value to batch size
         DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config.backend].batchSize);
         DOM.batchSizeSlider.max = (BATCH_SIZE_LIST.length - 1).toString();
@@ -1627,14 +1677,12 @@ window.onload = async () => {
         // Spectrogram labels
         DOM.specLabels.checked = config.specLabels;
         // Spectrogram frequencies
-        DOM.fromInput.value = config.minFrequency;
-        DOM.fromSlider.value = config.minFrequency;
-        DOM.toInput.value = config.maxFrequency;
-        DOM.toSlider.value = config.maxFrequency;
+        DOM.fromInput.value = config.audio.minFrequency;
+        DOM.fromSlider.value = config.audio.minFrequency;
+        DOM.toInput.value = config.audio.maxFrequency;
+        DOM.toSlider.value = config.audio.maxFrequency;
         fillSlider(DOM.fromInput, DOM.toInput,  '#C6C6C6', '#0d6efd', DOM.toSlider)
-        if (config.minFrequency > 0 || config.maxFrequency < 11950) {
-            document.getElementById('frequency-range').classList.add('text-warning');
-        }
+        checkFilteredFrequency();
         // Window function & colormap
         document.getElementById('window-function').value = config.customColormap.windowFn;
         config.colormap === 'custom' && document.getElementById('colormap-fieldset').classList.remove('d-none');
@@ -2448,8 +2496,8 @@ function onChartData(args) {
             scrollParent: false,
             fillParent: true,
             windowFunc: config.customColormap.windowFn,
-            frequencyMin: config.minFrequency,
-            frequencyMax: config.maxFrequency,
+            frequencyMin: config.audio.minFrequency,
+            frequencyMax: config.audio.maxFrequency,
             normalize: false,
             hideScrollbar: true,
             labels: config.specLabels,
@@ -2466,8 +2514,8 @@ function onChartData(args) {
     function specTooltip(event) {
         const waveElement = event.target;
         const specDimensions = waveElement.getBoundingClientRect();
-        const frequencyRange = Number(config.maxFrequency) - Number(config.minFrequency);
-        const yPosition = Math.round((specDimensions.bottom - event.clientY) * (frequencyRange / specDimensions.height)) + Number(config.minFrequency);
+        const frequencyRange = Number(config.audio.maxFrequency) - Number(config.audio.minFrequency);
+        const yPosition = Math.round((specDimensions.bottom - event.clientY) * (frequencyRange / specDimensions.height)) + Number(config.audio.minFrequency);
         tooltip.textContent = `Frequency: ${yPosition}Hz`;
         if (region) tooltip.innerHTML += "<br>" + formatRegionTooltip(region.start, region.end)
         tooltip.style.top = `${event.clientY}px`;
@@ -3381,36 +3429,35 @@ function onChartData(args) {
         // prepare the undelete record
         const [file, start, end,] = unpackNameAttr(target);
         const setting = target.closest('table');
-        const row = target.closest('tr');
-        let cname = target.querySelector('.cname').innerText;
-        let [species, confidence] = cname.split('\n');
-        // confirmed records don't have a confidence bar
-        if (!confidence) {
-            species =  species.slice(0, -9); // remove ' verified'
-            confidence = 2000;
-        } else { confidence = parseInt(confidence.replace('%', '')) * 10 }
-        const comment = target.querySelector('.comment').innerText;
-        const label = target.querySelector('.label').innerText;
-        let callCount = target.querySelector('.call-count').innerText;
-        callCount = callCount.replace('Present', '');
-        DELETE_HISTORY.push([species, start, end, comment, callCount, label, undefined, undefined, undefined, confidence])
-        
-        const [spp, callType] = getSpecies(target);
-
-        worker.postMessage({
-            action: 'delete',
-            file: file,
-            start: start,
-            end: end,
-            species: spp,
-            callType: callType,
-            speciesFiltered: isSpeciesViewFiltered()
-        })
-        // Clear the record in the UI
-        const index = row.rowIndex
-        // there may be no records remaining (no index)
-        index && setting.deleteRow(index);
-        setting.rows[index]?.click()
+        if (setting){
+            const row = target.closest('tr');
+            let cname = target.querySelector('.cname').innerText;
+            let [species, confidence] = cname.split('\n');
+            // confirmed records don't have a confidence bar
+            if (!confidence) {
+                species =  species.slice(0, -9); // remove ' verified'
+                confidence = 2000;
+            } else { confidence = parseInt(confidence.replace('%', '')) * 10 }
+            const comment = target.querySelector('.comment').innerText;
+            const label = target.querySelector('.label').innerText;
+            let callCount = target.querySelector('.call-count').innerText;
+            callCount = callCount.replace('Present', '');
+            DELETE_HISTORY.push([species, start, end, comment, callCount, label, undefined, undefined, undefined, confidence])
+            
+            worker.postMessage({
+                action: 'delete',
+                file: file,
+                start: start,
+                end: end,
+                species: getSpecies(target),
+                speciesFiltered: isSpeciesViewFiltered()
+            })
+            // Clear the record in the UI
+            const index = row.rowIndex
+            // there may be no records remaining (no index)
+            index > -1 && setting.deleteRow(index);
+            setting.rows[index]?.click()
+        }
     }
     
     const deleteSpecies = (target) => {
@@ -4342,13 +4389,15 @@ DOM.gain.addEventListener('input', () => {
                 break;
             }
             case 'reset-spec-frequency': {
-                config.minFrequency = 0;
-                config.maxFrequency = 11950;
-                DOM.fromInput.value = config.minFrequency;
-                DOM.fromSlider.value = config.minFrequency;
-                DOM.toInput.value = config.maxFrequency;
-                DOM.toSlider.value = config.maxFrequency;
+                config.audio.minFrequency = 0;
+                config.audio.maxFrequency = 11950;
+                DOM.fromInput.value = config.audio.minFrequency;
+                DOM.fromSlider.value = config.audio.minFrequency;
+                DOM.toInput.value = config.audio.maxFrequency;
+                DOM.toSlider.value = config.audio.maxFrequency;
                 fillSlider(DOM.fromInput, DOM.toInput,  '#C6C6C6', '#0d6efd', DOM.toSlider)
+                checkFilteredFrequency();
+                worker.postMessage({action: 'update-state', audio: config.audio});
                 const fftSamples = wavesurfer.spectrogram.fftSamples;
                 wavesurfer.destroy();
                 wavesurfer = undefined;
@@ -4356,6 +4405,18 @@ DOM.gain.addEventListener('input', () => {
                 document.getElementById('frequency-range').classList.remove('text-warning');
                 updatePrefs('config.json', config);
                 break;
+            }
+            case 'increaseFont': {
+                const fontScale = parseFloat(Math.min(1.1, config.fontScale + 0.1).toFixed(1)); // Don't let it go above 1.1
+                config.fontScale = fontScale;
+                setFontSizeScale();
+                break;
+            }
+            case 'decreaseFont': {
+                const fontScale = parseFloat(Math.max(0.7, config.fontScale - 0.1).toFixed(1)); // Don't let it go below 0.7
+                config.fontScale = fontScale;
+                setFontSizeScale();
+                break
             }
             case 'speciesFilter': { speciesFilter(e); break}
             case 'context-menu': { 
@@ -4580,7 +4641,7 @@ DOM.gain.addEventListener('input', () => {
                 }
                 case 'gain': {
                     DOM.gainAdjustment.textContent = element.value + 'dB'; //.toString();
-                    config.audio.gain = element.value;   
+                    config.audio.gain = element.value;
                     worker.postMessage({action:'update-state', audio: config.audio})
                     const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
                     fileLoaded &&
@@ -4601,34 +4662,28 @@ DOM.gain.addEventListener('input', () => {
                 }
                 case 'fromInput':
                 case 'fromSlider': {
-                    config.minFrequency = Math.max(element.valueAsNumber, 0);
-                    DOM.fromInput.value = config.minFrequency;
-                    DOM.fromSlider.value = config.minFrequency;
+                    config.audio.minFrequency = Math.max(element.valueAsNumber, 0);
+                    DOM.fromInput.value = config.audio.minFrequency;
+                    DOM.fromSlider.value = config.audio.minFrequency;
                     const fftSamples = wavesurfer.spectrogram.fftSamples;
                     wavesurfer.destroy();
                     wavesurfer = undefined;
                     adjustSpecDims(true, fftSamples);
-                    if (config.minFrequency > 0 || config.maxFrequency < 11950) {
-                        document.getElementById('frequency-range').classList.add('text-warning');
-                    } else {
-                       document.getElementById('frequency-range').classList.remove('text-warning');
-                    }
+                    checkFilteredFrequency();
+                    worker.postMessage({action: 'update-state', audio: config.audio});
                     break;
                 }
                 case 'toInput':
                 case 'toSlider': {
-                    config.maxFrequency = Math.min(element.valueAsNumber, 11950);
-                    DOM.toInput.value = config.maxFrequency;
-                    DOM.toSlider.value = config.maxFrequency;
+                    config.audio.maxFrequency = Math.min(element.valueAsNumber, 11950);
+                    DOM.toInput.value = config.audio.maxFrequency;
+                    DOM.toSlider.value = config.audio.maxFrequency;
                     const fftSamples = wavesurfer.spectrogram.fftSamples;
                     wavesurfer.destroy();
                     wavesurfer = undefined;
                     adjustSpecDims(true, fftSamples);
-                    if (config.minFrequency > 0 || config.maxFrequency < 11950) {
-                        document.getElementById('frequency-range').classList.add('text-warning');
-                    } else {
-                        document.getElementById('frequency-range').classList.remove('text-warning');
-                    }
+                    checkFilteredFrequency();
+                    worker.postMessage({action: 'update-state', audio: config.audio});
                     break;
                 }
                 case 'normalise': {
@@ -4922,6 +4977,19 @@ async function readLabels(labelFile, updating){
             speciesFiltered: isSpeciesViewFiltered(true)
         })
         resetResults({clearPagination: false})
+    }
+
+    function checkFilteredFrequency(){
+        const resetButton = document.getElementById('reset-spec-frequency');
+        if (config.audio.minFrequency > 0 || config.audio.maxFrequency < 11950) {
+            document.getElementById('frequency-range').classList.add('text-warning');
+            resetButton.classList.add('btn-warning');
+            resetButton.classList.remove('btn-secondary', 'disabled');
+        } else {
+            document.getElementById('frequency-range').classList.remove('text-warning');
+            resetButton.classList.remove('btn-warning');
+            resetButton.classList.add('btn-secondary', 'disabled');
+        }
     }
 
     function getCurrentPage(){

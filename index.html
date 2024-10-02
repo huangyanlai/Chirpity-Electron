@@ -29,7 +29,7 @@
     <!-- App title -->
     <title>Chirpity Bird Call Detection</title>
 </head>
-<body>
+<body background="#ccccc">
     <!-- Loading Spinner Overlay -->
     <div id="loadingOverlay" class="overlay d-none text-white">
         <div class="d-flex">Loading Xento Canto data...</div>
@@ -62,7 +62,7 @@
                     </div>
                     <div class="form_control_container d-flex">
                         <div class="form_control_container__time"></div>
-                        <button class="btn btn-warning align-self-end pt-0 pb-0" id="reset-spec-frequency" onclick="return false">Reset</button>
+                        <button class="btn btn-secondary disabled align-self-end pt-0 pb-0" id="reset-spec-frequency" onclick="return false">Reset</button>
                     </div>
                 </div>
             </fieldset>
@@ -74,6 +74,7 @@
         </div>
         <div class="offcanvas-body pt-1">
             <!-- Offcanvas -->
+            <form id="settingsForm" class="fs-6">
                 <fieldset class="border border-secondary rounded m-2 mt-0 mb-0 p-2">
                     <legend style="font-size: large;font-weight:bold">Detections</legend>
                     <div>
@@ -272,6 +273,14 @@
                                 <input class="form-check-input" type="checkbox" role="switch" id="power-save-block">
                                 <label class="form-check-label" for="power-save-block">Prevent system sleep</label>
                             </div>
+                        </div>
+                    </div>
+                    <div>
+                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Adjust font size" data-bs-content="Change the global font size settings for the application.">?</a>
+                        <div class="pe-3 form-group rounded p-2 mb-2">
+                                Adjust font size: 
+                                <span  id="decreaseFont" class="material-symbols-outlined btn btn-outline-secondary p-1">text_decrease</span> 
+                                <span  id="increaseFont" class="material-symbols-outlined btn btn-outline-secondary p-1">text_increase</span>
                         </div>
                     </div>
                 </fieldset>
@@ -789,8 +798,7 @@
                 data-bs-toggle="offcanvas" data-bs-target="#settings" aria-controls="settings">Settings <span class="material-symbols-outlined fs-5 align-middle">settings</span></button>
             </div>
             <!-- navbar-collapse.// -->
-            <img src="img/logo/chirpity_logo2.png" alt="Chirpity bird calls: Identifying birds by sound"
-            height="40">
+            <img id="primaryLogo" src="img/logo/chirpity_logo2.png" alt="Chirpity bird calls: Identifying birds by sound">
         </div>
         <!-- container-fluid.// -->
     </nav>
@@ -1091,7 +1099,6 @@
             <div id="complete" class="col-2 pe-2" style="display:none">
             </div>
             <div class="col pe-1">
-                <form id="settingsForm" class="fs-6">
 
                 <div class="btn-group float-end" id="filter-panel">
                     <span style="max-width: 70px" title="Nocmig mode on" id="nocmigMode"
