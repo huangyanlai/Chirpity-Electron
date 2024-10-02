@@ -379,6 +379,7 @@ async function handleMessage(e) {
                 predictWorkers.length && terminateWorkers()
             };
             await onLaunch(args);
+            STATE.included = {};
             break;
         }
         case "post": {await uploadOpus(args);
@@ -427,9 +428,13 @@ async function handleMessage(e) {
             appPath = args.path || appPath;
             // If we change the speciesThreshold, we need to invalidate any location caches
             if (args.speciesThreshold) {
-                if (STATE.included?.['birdnet']?.['location'])  STATE.included.birdnet.location = {};
-                if (STATE.included?.['chirpity']?.['location'])  STATE.included.chirpity.location = {};
+                for (const key in STATE.included) {
+                    if (STATE.included[key]?.location) {
+                        STATE.included[key].location = {};
+                    }
+                }
             }
+            
             // likewise, if we change the "use local birds" setting we need to flush the migrants cache"
             if (args.local !== undefined){
                 if (STATE.included?.['birdnet']?.['nocturnal'])  delete STATE.included.birdnet.nocturnal;
