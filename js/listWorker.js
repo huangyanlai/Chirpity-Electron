@@ -133,11 +133,17 @@ const NOT_BIRDS = [
 "Spea bombifrons_Plains Spadefoot",
 "Tamias striatus_Eastern Chipmunk",
 "Tamiasciurus hudsonicus_Red Squirrel",
-'Thunder_Thunder',
-'Vehicle_Vehicle',
-'Water Drops_Water Drops',
-'Waves_Waves',
-'Wind_Wind'
+"Human vocal_Human vocal",
+"Human non-vocal_Human non-vocal",
+"Human whistle_Human whistle",
+"Dog_Dog",
+"Power tools_Power tools",
+"Siren_Siren",
+"Engine_Engine",
+"Gun_Gun",
+"Fireworks_Fireworks",
+"Environmental_Environmental",
+"Noise_Noise"
 ];
 
 const birdnetlabelFile = `../labels/V2.4/BirdNET_GLOBAL_6K_V2.4_Labels_en.txt`; 
@@ -179,6 +185,7 @@ listWorker.postMessage({message: 'get-list', model: 'chirpity', listType: 'locat
 onmessage = async (e) => {
     DEBUG && console.log('got a message', e.data)
     const {message} = e.data;
+
     try {
         switch (message) {
 

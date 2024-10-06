@@ -32,7 +32,7 @@
 <body background="#ccccc">
     <!-- Loading Spinner Overlay -->
     <div id="loadingOverlay" class="overlay d-none text-white">
-        <div class="d-flex">Loading Xento Canto data...</div>
+        <div id="loadingText" class="d-flex"></div>
         <div class="d-flex justify-content-evenly">
             <div class="spinner-grow spinner-grow-sm m-3" role="status">
               <span class="visually-hidden">Loading...</span>
@@ -437,7 +437,7 @@
                             <option value="blackbody">Blackbody</option>
                         </select>
                     </div>
-                    <fieldset class="border border-secondary rounded m-2 mb-0 p-2 w-100 d-none" id="colormap-fieldset">
+                    <fieldset class="border border-secondary rounded m-2 p-2 d-none" id="colormap-fieldset">
                         <div class="mt-2">
                             <input class="form-input pointer" type="color" id="loud-color" value="#cc00ff">
                             <label class="form-label pointer" for="loud-color">Peak colour</label><br>
@@ -478,7 +478,35 @@
                             <option value="timeOfDay">Time of day</option>
                         </select>
                     </div>
-                </fieldset>                                                        
+                </fieldset>
+                <fieldset class="border border-secondary rounded m-2 mb-0 p-2">
+                    <legend style="font-size: large;font-weight:bold">Archive Preferences <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Archive Preferences" 
+                        data-bs-html="true" data-bs-content="Select the location, structure and format for archive files. An Lossy archive uses about 1GB of storage for 24 hours of archived audio. FLAC is lossless, but requires significantly more storage space.<p><b>N.B.</b> Lossy files are resampled to 26KHz and downmixed to mono.</p>">?</a></legend>
+                    <div class="form-group rounded p-2 mb-2">
+                        <div class="col form-check form-switch">
+                            <label class="form-check-label" for="auto-archive">Automatically archive audio files
+                                <input class="form-check-input" type="checkbox" role="switch" id="auto-archive">
+                            </label>
+                            <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Archive Automatically" data-bs-content="When enabled, files are converted to the specified format and added to the archive location whenever detections are saved to the archive.">?</a>
+                        </div>
+                    </div>
+                    <div class="row p-2" id="choose-archive-location">
+                        <div class="col">
+                            <div class="input-group">
+                                <button class="btn btn-outline-secondary" type="button" id="archive-location-select"> Archive location:</button>
+                                <input type="text" class="form-control" id="archive-location" aria-describedby="archive-location-select" placeholder="No location set" readonly>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="input-group rounded p-2 mb-1">
+                        <label for="archive-format" class="input-group-text col-5">Archive Format:</label>
+                        <select class="form-select mb-0" id="archive-format">
+                            <option value="opus">Lossy</option>
+                            <option value="flac">Lossless</option>
+                        </select>
+                        
+                    </div>
+                </fieldset>
                 <fieldset class="border border-secondary rounded m-2 p-2">
                     <legend class="pb-2" style="font-size: large;font-weight:bold;">Advanced</legend>
                     <div class="form-group rounded p-2 mb-2">
@@ -711,6 +739,9 @@
                                 <span class="material-symbols-outlined">youtube_searched_for</span> Restore Latest Analysis
                             </li>
                             <li class="dropdown-divider"></li>
+                            <li class="dropdown-item disabled" id="compress-and-organise">
+                                <span class="material-symbols-outlined">compress</span> Compress and Organise Archive
+                            </li>
                             <li class="dropdown-item disabled" id="purge-file">
                                 <span class="material-symbols-outlined">unarchive</span> Remove Current File From
                                 Archive
@@ -1072,7 +1103,9 @@
                     <div class="w-100" id="waveform"></div>
                 </div>
                 <!-- Controls view -->
-                <div class="container-fluid p-1 text-bg-dark d-inline-flex" id="controlsWrapper" style="max-height: 50px">
+                <div class="container-fluid p-1 text-bg-dark d-inline-flex" id="controlsWrapper" style="max-height: 50px" title="Drag to resize the Spectrogram window.">
+                    <a id="guano" class="pointer pt-2 d-none" tabindex="-1" data-bs-custom-class="guano-popover" data-bs-html="true" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="File Metadata">
+                        <span class="material-symbols-outlined"  title="Display GUANO metadata">other_admission</span></a>
                     <div id="filename" class="col-auto ps-1 overflow-visible flex-nowrap"></div>
                     <div id="unsaved-icon" class="material-symbols-outlined ms-2 me-2 text-warning pointer d-none"  tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Unsaved Edits" data-bs-content="There are changes to the results that haven't been saved.">warning</div>
                     <div class="col-auto btn-group bg-dark ms-2 me-2 text-nowrap" role="group">

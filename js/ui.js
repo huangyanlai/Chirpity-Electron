@@ -1,6 +1,7 @@
 import {trackVisit, trackEvent} from './tracking.js';
 
-let seenTheDarkness = false, shownDaylightBanner = false, LOCATIONS, locationID = undefined;
+let seenTheDarkness = false, shownDaylightBanner = false, LOCATIONS, locationID = undefined, loadingTimeout;
+const startTime = performance.now();
 let LABELS = [], DELETE_HISTORY = [];
 // Save console.warn and console.error functions
 const originalWarn = console.warn;
@@ -16,7 +17,7 @@ function customURLEncode(str) {
   }
 
 // Override console.warn to intercept and track warnings
-console.warn = function(message) {
+console.warn = function() {
     // Call the original console.warn to maintain default behavior
     originalWarn.apply(console, arguments);
     
@@ -25,7 +26,7 @@ console.warn = function(message) {
 };
 
 // Override console.error to intercept and track errors
-console.error = function(message) {
+console.error = function() {
     // Call the original console.error to maintain default behavior
     originalError.apply(console, arguments);
     
@@ -229,11 +230,12 @@ DOM.controlsWrapper.addEventListener('mousedown', (e) => {
     if (e.target.tagName !== 'DIV' ) return
     const startY = e.clientY;
     const initialHeight = DOM.spectrogram.offsetHeight;
+    let newHeight;
     let debounceTimer;
     const onMouseMove = (e) => {
         clearTimeout(debounceTimer);
         // Calculate the delta y (drag distance)
-        const newHeight = initialHeight + e.clientY - startY;
+        newHeight = initialHeight + e.clientY - startY;
     
         // Adjust the spectrogram dimensions accordingly
         debounceTimer = setTimeout(() => {
@@ -245,6 +247,7 @@ DOM.controlsWrapper.addEventListener('mousedown', (e) => {
     const onMouseUp = () => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        trackEvent(config.UUID, 'Drag', 'Spec Resize', newHeight );
     };
     // Attach event listeners for mousemove and mouseup
     document.addEventListener('mousemove', onMouseMove);
@@ -469,11 +472,14 @@ const initWavesurfer = ({
 
     waveElement.removeEventListener('mousedown', resetRegions);
     waveElement.removeEventListener('mousemove', specTooltip);
-    waveElement.removeEventListener('mouseout', hideTooltip)
+    waveElement.removeEventListener('mouseout', hideTooltip);
+    waveElement.removeEventListener('dblclick', centreSpec);
+    
 
-    waveElement.addEventListener('mousemove', specTooltip); 
+    waveElement.addEventListener('mousemove', specTooltip, {passive: true}); 
     waveElement.addEventListener('mousedown', resetRegions);
     waveElement.addEventListener('mouseout', hideTooltip);
+    waveElement.addEventListener('dblclick', centreSpec);
 }
 
 function updateElementCache() {
@@ -515,7 +521,7 @@ function zoomSpec(direction) {
         let timeNow = bufferBegin + offsetSeconds;
         const oldBufferBegin = bufferBegin;
         if (direction === 'zoomIn') {
-            if (windowLength < 1.5) return;
+            //if (windowLength < 1.5) return;
             windowLength /= 2;
             bufferBegin += windowLength * position;
         } else {
@@ -671,10 +677,53 @@ function extractFileNameAndFolder(path) {
     }
 }
 
+/**
+ * Formats a JSON object as a Bootstrap table
+ * @param {object} jsonData - The JSON object to format
+ * @returns {string} - HTML string of the formatted Bootstrap table
+ */
+function formatAsBootstrapTable(jsonData) {
+    let tableHtml = "<div class='guano'><table class='table table-striped table-bordered'><thead class='text-bg-light'><tr><th>Key</th><th>Value</th></tr></thead><tbody>";
+
+    // Iterate over the key-value pairs in the JSON object
+    for (const [key, value] of Object.entries(JSON.parse(jsonData))) {
+        tableHtml += '<tr>';
+        tableHtml += `<td><strong>${key}</strong></td>`;
+
+        // Check if the value is an object or array, if so, stringify it
+        if (typeof value === 'object') {
+            tableHtml += `<td>${JSON.stringify(value, null, 2)}</td>`;
+        } else {
+            tableHtml += `<td>${value}</td>`;
+        }
+
+        tableHtml += '</tr>';
+    }
+
+    tableHtml += '</tbody></table></div>';
+    return tableHtml;
+}
+function showGUANO(){
+    const icon = document.getElementById('guano');
+    if (STATE.guano){
+        icon.classList.remove('d-none');
+        icon.setAttribute('data-bs-content', 'New content for the popover');
+        // Reinitialize the popover to reflect the updated content
+        const popover = bootstrap.Popover.getInstance(icon);
+        popover.setContent({
+            '.popover-header': 'GUANO Metadata',
+            '.popover-body': formatAsBootstrapTable(STATE.guano)
+          });
+    } else {
+        icon.classList.add('d-none');
+    }
+}
+
 function renderFilenamePanel() {
     if (!currentFile) return;
     const openfile = currentFile;
     const files = fileList;
+    showGUANO();
     let filenameElement = document.getElementById('filename');
     filenameElement.innerHTML = '';
     //let label = openfile.replace(/^.*[\\\/]/, "");
@@ -779,9 +828,9 @@ const showLocation = async (fromSelect) => {
         newLocation = LOCATIONS.find(obj => obj.id === id);
         //locationSelect.value = id;
         if (newLocation){
-            latEl.value = newLocation.lat, lonEl.value = newLocation.lon, customPlaceEl.value = newLocation.place;
+            latEl.value = newLocation.lat, lonEl.value = newLocation.lon, customPlaceEl.value = newLocation.place, locationSelect.value = id;
         } else {
-            latEl.value = config.latitude, lonEl.value = config.longitude, customPlaceEl.value = config.location;
+            latEl.value = config.latitude, lonEl.value = config.longitude, customPlaceEl.value = config.location, locationSelect.value = '';
         }
     }
     else {  //Default location
@@ -800,14 +849,14 @@ const displayLocationAddress = async (where) => {
         latEl = document.getElementById('customLat');
         lonEl = document.getElementById('customLon');
         placeEl = document.getElementById('customPlace');
-        address = await fetchLocationAddress(latEl.value, lonEl.value, false);
+        address = await fetchLocationAddress(latEl.value, lonEl.value, false).catch(error => console.warn(error));
         if (address === false) return
         placeEl.value = address || 'Location not available';
     } else {
         latEl = document.getElementById('latitude');
         lonEl = document.getElementById('longitude');
         placeEl = document.getElementById('place');
-        address = await fetchLocationAddress(latEl.value, lonEl.value, false);
+        address = await fetchLocationAddress(latEl.value, lonEl.value, false).catch(error => console.warn(error));;
         if (address === false) return
         const content = '<span class="material-symbols-outlined">fmd_good</span> ' + address;
         placeEl.innerHTML = content;
@@ -1050,45 +1099,49 @@ function postAnalyseMessage(args) {
     }
 }
 
-
+let openStreetMapTimer;
 function fetchLocationAddress(lat, lon) {
-    if (isNaN(lat) || isNaN(lon)  || !lat || !lon){
-        generateToast({ message:'Both lat and lon values need to be numbers between 180 and -180'})
-        return false
-    }
-    return new Promise((resolve, reject) => {
-        if (!LOCATIONS) {
-            worker.postMessage({ action: 'get-locations', file: currentFile });
-            waitForLocations();
+    
+        if (isNaN(lat) || isNaN(lon)  || !lat || !lon){
+            generateToast({ message:'Both lat and lon values need to be numbers between 180 and -180'})
+            return false
         }
-        const storedLocation = LOCATIONS?.find(obj => obj.lat === lat && obj.lon === lon);
-        if (storedLocation) return resolve(storedLocation.place);
-        
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=14`)
-        .then(response => {
-            if (!response.ok) {
-                console.warn('Network error: ', response.status, response.url );
-                
+        return new Promise((resolve, reject) => {
+            clearTimeout(openStreetMapTimer)
+            openStreetMapTimer = setTimeout(() => {
+            if (!LOCATIONS) {
+                worker.postMessage({ action: 'get-locations', file: currentFile });
+                waitForLocations();
             }
-            return response.json()
-        })
-        .then(data => {
-            let address;
-            if (data.error) {
-                address = "No location found for this map point";
-            } else {
-                // Just take the first two elements of the address
-                address = data.display_name.split(',').slice(0,2).join(", ");
-                
-                LOCATIONS.push({ id: LOCATIONS.length + 1, lat: lat, lon: lon, place: address })
-            }
-            resolve(address);
-        })
-        .catch(error => {
-            console.log("A location for this point could not be retrieved from OpenStreetMap")
-            reject(error);
-        })
+            const storedLocation = LOCATIONS?.find(obj => obj.lat === lat && obj.lon === lon);
+            if (storedLocation) return resolve(storedLocation.place);
+            
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=14`)
+            .then(response => {
+                if (!response.ok) {
+                    return reject(`Network error: code ${response.status} fetching Location from OpenStreetmap.` );
+                }
+                return response.json()
+            })
+            .then(data => {
+                let address;
+                if (data.error) {
+                    address = "No location found for this map point";
+                } else {
+                    // Just take the first two elements of the address
+                    address = data.display_name.split(',').slice(0,2).join(",").trim();
+                    
+                    LOCATIONS.push({ id: LOCATIONS.length + 1, lat: lat, lon: lon, place: address })
+                }
+                resolve(address);
+            })
+            .catch(error => {
+                console.warn("A location for this point could not be retrieved from OpenStreetMap")
+                reject(error);
+            })
+        }, 1000) // 1 second delay
     })
+    
 }
 
 
@@ -1273,10 +1326,18 @@ selectionTable.addEventListener('click', resultClick);
 
 async function resultClick(e) {
     let row = e.target.closest('tr');
-    let classList = e.target.classList;
-    if (!row || row.classList.length === 0) { // 1. clicked and dragged, 2 no detections in file row
+    if (!row || row.classList.length === 0) { 
+        // 1. clicked and dragged, 2 no detections in file row, 3. already selected this row
         return
     }
+    
+    const [file, start, end, sname, label] = row.getAttribute('name').split('|');
+    if (row.classList.contains('table-active')){
+        createRegion(start - bufferBegin, end - bufferBegin, label, true);
+        e.target.classList.contains('circle') && getSelectionResults(true);
+        return;
+    }
+    
     // Search for results rows
     while (!(row.classList.contains('nighttime') ||
     row.classList.contains('daytime'))) {
@@ -1286,7 +1347,6 @@ async function resultClick(e) {
     if (activeRow) activeRow.classList.remove('table-active');
     row.classList.add('table-active');
     activeRow = row;
-    const [file, start, end, sname, label] = row.getAttribute('name').split('|');
     loadResultRegion({ file, start, end, label });
     if (e.target.classList.contains('circle')) {
         await waitForFileLoad();
@@ -1563,6 +1623,7 @@ function fillDefaults(config, defaultConfig) {
 /////////////////////////  Window Handlers ////////////////////////////
 // Set config defaults
 const defaultConfig = {
+    archive: {location: undefined, format: 'ogg', auto: false},
     fontScale: 1,
     seenTour: false,
     lastUpdateCheck: 0,
@@ -1578,15 +1639,14 @@ const defaultConfig = {
     speciesThreshold: 0.03,
     useWeek: false,
     model: 'chirpity',
-    chirpity: {locale: 'en_uk'},
-    birdnet: {locale: 'en'},
+    chirpity: {locale: 'en_uk', backend: 'tensorflow'},
+    birdnet: {locale: 'en', backend: 'tensorflow'},
     latitude: 52.87,
     longitude: 0.89, 
     location: 'Great Snoring, North Norfolk',
     detect: { nocmig: false, contextAware: false, confidence: 45 },
     filters: { active: false, highPassFrequency: 0, lowShelfFrequency: 0, lowShelfAttenuation: 0, SNR: 0, sendToModel: false },
     warmup: true,
-    backend: 'webgpu',
     hasNode: false,
     tensorflow: { threads: DIAGNOSTICS['Cores'], batchSize: 32 },
     webgpu: { threads: 2, batchSize: 8 },
@@ -1646,11 +1706,11 @@ window.onload = async () => {
         // Fontsize
         config.fontScale === 1 || setFontSizeScale();
         // Map slider value to batch size
-        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config.backend].batchSize);
+        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config[config.model].backend].batchSize);
         DOM.batchSizeSlider.max = (BATCH_SIZE_LIST.length - 1).toString();
-        DOM.batchSizeValue.textContent = config[config.backend].batchSize;
+        DOM.batchSizeValue.textContent = config[config[config.model].backend].batchSize;
         DOM.modelToUse.value = config.model;
-        const backendEL = document.getElementById(config.backend);
+        const backendEL = document.getElementById(config[config.model].backend);
         backendEL.checked = true;
         // Show time of day in results?
         setTimelinePreferences();
@@ -1714,7 +1774,7 @@ window.onload = async () => {
         showThreshold(config.detect.confidence);
         SNRSlider.value = config.filters.SNR;
         SNRThreshold.textContent = config.filters.SNR;
-        if (config.backend === 'webgl' || config.backend === 'webgpu') {
+        if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
             SNRSlider.disabled = true;
         };
         
@@ -1730,14 +1790,22 @@ window.onload = async () => {
         filterIconDisplay();
         
         DOM.threadSlider.max = DIAGNOSTICS['Cores'];
-        DOM.threadSlider.value = config[config.backend].threads;
-        DOM.numberOfThreads.textContent = config[config.backend].threads;
+        DOM.threadSlider.value = config[config[config.model].backend].threads;
+        DOM.numberOfThreads.textContent = config[config[config.model].backend].threads;
         DOM.defaultLat.value = config.latitude;
         DOM.defaultLon.value = config.longitude;
         place.innerHTML = '<span class="material-symbols-outlined">fmd_good</span>' + config.location;
+        if (config.archive.location) {
+            document.getElementById('archive-location').value = config.archive.location;
+            document.getElementById('archive-format').value = config.archive.format;
+            const autoArchive = document.getElementById('auto-archive');
+            autoArchive.checked = config.archive.auto;
+
+        }
         //setListUIState(config.list);
         worker.postMessage({
             action: 'update-state',
+            archive: config.archive,
             path: appPath,
             temp: tempPath, 
             lat: config.latitude,
@@ -1755,12 +1823,19 @@ window.onload = async () => {
             UUID: config.UUID,
             track: config.track
         });
-        const {model, backend, list} = config;
+        const {model, list} = config;
         t0_warmup = Date.now();
-        worker.postMessage({action: '_init_', model: model, batchSize: config[backend].batchSize, threads: config[backend].threads, backend: backend, list: list})
+        worker.postMessage({action: '_init_', model: model, batchSize: config[config[model].backend].batchSize, threads: config[config[model].backend].threads, backend: config[model].backend, list: list})
         // Enable popovers
+        const myAllowList = bootstrap.Tooltip.Default.allowList;
+        myAllowList.table = [];  // Allow <table> element with no attributes
+        myAllowList.thead = [];
+        myAllowList.tbody = [];
+        myAllowList.tr = [];
+        myAllowList.td = [];
+        myAllowList.th = [];
         const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]')
-        const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl))
+        const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl, {allowList: myAllowList}))
         
 
         // check for new version on mac platform. pkg containers are not an auto-updatable target
@@ -1768,8 +1843,9 @@ window.onload = async () => {
         isMac && checkForMacUpdates();
         const doNotTrack = document.getElementById('do-not-track')
         doNotTrack.checked = !config.track;
-        // Add cpu model to config
+        // Add cpu model & memory to config
         config.CPU = DIAGNOSTICS['CPU'];
+        config.RAM = DIAGNOSTICS['System Memory'];
         config.track && trackVisit(config);
     })
 }
@@ -1796,6 +1872,10 @@ const setUpWorkerMessaging = () => {
                 case "chart-data": {onChartData(args);
                     break;
                 }
+                case "conversion-progress": { 
+                    displayProgress(args.progress, args.text)
+                    break;
+                }
                 case "current-file-week": { 
                     STATE.week = args.week
                     break;
@@ -1803,6 +1883,7 @@ const setUpWorkerMessaging = () => {
                 case "diskDB-has-records": {
                     chartsLink.classList.remove("disabled");
                     exploreLink.classList.remove("disabled");
+                    config.archive.location && document.getElementById('compress-and-organise').classList.remove('disabled');
                     break;
                 }
                 case "file-location-id": {onFileLocationID(args);
@@ -1831,6 +1912,8 @@ const setUpWorkerMessaging = () => {
                             `
                     }
                     generateToast({ message: args.message});
+                    // This is how we know the database update has completed
+                    if (args.database && config.archive.auto) document.getElementById('compress-and-organise').click();
                 break;
                 }
                 // Called when last result is returned from a database query
@@ -1859,8 +1942,7 @@ const setUpWorkerMessaging = () => {
                         // change header to indicate activation
                         DOM.resultHeader.classList.remove('text-bg-secondary');
                         DOM.resultHeader.classList.add('text-bg-dark');
-                        // PREDICTING = false;
-                        // STATE.analysisDone = true;
+                        adjustSpecDims(true)
                     } else {
                         disableMenuItem(['purge-file']);
                         // change header to indicate deactivation
@@ -1904,7 +1986,7 @@ const setUpWorkerMessaging = () => {
                         handleBackendChange('tensorflow');
                     }
                     config.hasNode = args.hasNode;
-                    if (!config.hasNode && config.backend !== 'webgpu'){
+                    if (!config.hasNode && config[config.model].backend !== 'webgpu'){
                         // No node? Not using webgpu? Force webgpu
                         handleBackendChange('webgpu');
                         generateToast({ message: 'The standard backend could not be loaded on this machine. An experimental backend (webGPU) has been used instead.'});
@@ -2465,7 +2547,7 @@ function onChartData(args) {
             dragSelection: true,
             maxRegions: 1,
             // Region length bug (likely mine) means I don't trust leangths > 60 seconds
-            maxLength: config[config.backend].batchSize * 3,
+            maxLength: config[config[config.model].backend].batchSize * 3,
             slop: null,
             color: "rgba(255, 255, 255, 0.2)"
         })
@@ -2511,17 +2593,26 @@ function onChartData(args) {
     function hideTooltip() {
         tooltip.style.visibility = 'hidden';
     };
-    function specTooltip(event) {
+
+    async function specTooltip(event) {
         const waveElement = event.target;
         const specDimensions = waveElement.getBoundingClientRect();
         const frequencyRange = Number(config.audio.maxFrequency) - Number(config.audio.minFrequency);
         const yPosition = Math.round((specDimensions.bottom - event.clientY) * (frequencyRange / specDimensions.height)) + Number(config.audio.minFrequency);
         tooltip.textContent = `Frequency: ${yPosition}Hz`;
-        if (region) tooltip.innerHTML += "<br>" + formatRegionTooltip(region.start, region.end)
-        tooltip.style.top = `${event.clientY}px`;
-        tooltip.style.left = `${event.clientX + 15}px`; // Adjust tooltip position
-        tooltip.style.display = 'block';
-        tooltip.style.visibility = 'visible';
+        if (region) {
+            const lineBreak = document.createElement('br');
+            const textNode = document.createTextNode(formatRegionTooltip(region.start, region.end));
+            
+            tooltip.appendChild(lineBreak);  // Add the line break
+            tooltip.appendChild(textNode);   // Add the text node
+        }
+        Object.assign(tooltip.style, {
+            top: `${event.clientY}px`,
+            left: `${event.clientX + 15}px`,
+            display: 'block',
+            visibility: 'visible'
+        });
     }
 
 
@@ -2564,26 +2655,27 @@ function onChartData(args) {
             updatePrefs('config.json', config)
         }
     })
-    
+
+   
     const loadModel = ()  => {
         t0_warmup = Date.now();
         worker.postMessage({
             action: 'load-model',
             model: config.model,
             list: config.list,
-            batchSize: config[config.backend].batchSize,
+            batchSize: config[config[config.model].backend].batchSize,
             warmup: config.warmup,
-            threads: config[config.backend].threads,
-            backend: config.backend
+            threads: config[config[config.model].backend].threads,
+            backend: config[config.model].backend
         });
         
     }
     
     const handleBackendChange = (backend) => {
-        config.backend = backend instanceof Event ? backend.target.value : backend;
-        const backendEL = document.getElementById(config.backend);
+        config[config.model].backend = backend instanceof Event ? backend.target.value : backend;
+        const backendEL = document.getElementById(config[config.model].backend);
         backendEL.checked = true;
-        if (config.backend === 'webgl' || config.backend === 'webgpu') {
+        if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
             SNRSlider.disabled = true;
             config.filters.SNR = 0;
         } else {
@@ -2605,9 +2697,9 @@ function onChartData(args) {
             STATE.analysisDone = true;
         }
         // Update threads and batch Size in UI
-        DOM.threadSlider.value = config[config.backend].threads;
-        DOM.numberOfThreads.textContent = config[config.backend].threads;
-        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config.backend].batchSize);
+        DOM.threadSlider.value = config[config[config.model].backend].threads;
+        DOM.numberOfThreads.textContent = config[config[config.model].backend].threads;
+        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config[config.model].backend].batchSize);
         DOM.batchSizeValue.textContent = BATCH_SIZE_LIST[DOM.batchSizeSlider.value].toString();
         updatePrefs('config.json', config)
         // restart wavesurfer regions to set new maxLength
@@ -2649,28 +2741,32 @@ function onChartData(args) {
     };
     //document.getElementById('timelineSetting').addEventListener('change', timelineToggle);
     
+function centreSpec(){
+    const saveBufferBegin = bufferBegin;
+    const middle = bufferBegin + wavesurfer.getCurrentTime();
+    bufferBegin = middle - windowLength / 2;
+    bufferBegin = Math.max(0, bufferBegin);
+    bufferBegin = Math.min(bufferBegin, currentFileDuration - windowLength)
+    // Move the region if needed
+    let region = getRegion();
+    if (region){
+        const shift = saveBufferBegin - bufferBegin;
+        region.start += shift;
+        region.end += shift;
+        if (region.start < 0 || region.end > windowLength) region = undefined;
+    }
+    postBufferUpdate({ begin: bufferBegin, position: 0.5, region: region, goToRegion: false})
+}
+
     /////////// Keyboard Shortcuts  ////////////
       
     const GLOBAL_ACTIONS = { // eslint-disable-line
         a: function (e) { ( e.ctrlKey || e.metaKey) && currentFile && document.getElementById('analyse').click()},
         A: function (e) { ( e.ctrlKey || e.metaKey) && currentFile && document.getElementById('analyseAll').click()},
-        c: function (e) {
+        c: function (e) { 
             // Center window on playhead
             if (( e.ctrlKey || e.metaKey) && currentBuffer) {
-                const saveBufferBegin = bufferBegin;
-                const middle = bufferBegin + wavesurfer.getCurrentTime();
-                bufferBegin = middle - windowLength / 2;
-                bufferBegin = Math.max(0, bufferBegin);
-                bufferBegin = Math.min(bufferBegin, currentFileDuration - windowLength)
-                // Move the region if needed
-                let region = getRegion();
-                if (region){
-                    const shift = saveBufferBegin - bufferBegin;
-                    region.start += shift;
-                    region.end += shift;
-                    if (region.start < 0 || region.end > windowLength) region = undefined;
-                }
-                postBufferUpdate({ begin: bufferBegin, position: 0.5, region: region, goToRegion: false})
+                centreSpec();
             }
         },
         // D: function (e) {
@@ -2721,7 +2817,7 @@ function onChartData(args) {
                 worker.postMessage({
                     action: 'abort',
                     model: config.model,
-                    threads: config[config.backend].threads,
+                    threads: config[config[config.model].backend].threads,
                     list: config.list
                 });
                 generateToast({ message:'Operation cancelled'});
@@ -2751,7 +2847,6 @@ function onChartData(args) {
             if (activeRow) {
                 activeRow.classList.remove('table-active')
                 activeRow = activeRow.previousSibling || activeRow;
-                activeRow.classList.add('table-active')
                 activeRow.focus();
                 if (!activeRow.classList.contains('text-bg-dark')) activeRow.click();
             }
@@ -2767,7 +2862,6 @@ function onChartData(args) {
             if (activeRow) {
                 activeRow.classList.remove('table-active')
                 activeRow = activeRow.nextSibling || activeRow;
-                activeRow.classList.add('table-active')
                 activeRow.focus();
                 if (!activeRow.classList.contains('text-bg-dark')) activeRow.click();
             }
@@ -2800,14 +2894,11 @@ function onChartData(args) {
         ' ': function () { wavesurfer && wavesurfer.playPause() },
         Tab: function (e) {
             if (activeRow) {
+                activeRow.classList.remove('table-active')
                 if (e.shiftKey) {
-                    activeRow.classList.remove('table-active')
                     activeRow = activeRow.previousSibling || activeRow;
-                    activeRow.classList.add('table-active')
                 } else {
-                    activeRow.classList.remove('table-active')
                     activeRow = activeRow.nextSibling || activeRow;
-                    activeRow.classList.add('table-active')
                 }
                 activeRow.focus();
                 if (!activeRow.classList.contains('text-bg-dark')) activeRow.click();
@@ -2849,6 +2940,13 @@ function onChartData(args) {
             goToRegion: goToRegion,
             queued: queued
         });
+        // In case it takes a while:
+        if (!queued){
+            loadingTimeout = setTimeout(() => {
+                const loading = document.getElementById('loadingOverlay');
+                loading.querySelector('#loadingText').textContent = 'Loading file...';
+                loading.classList.remove('d-none')}, 500)
+        }
     }
     
     // Go to position
@@ -2951,9 +3049,14 @@ function onChartData(args) {
         fileRegion = undefined,
         play = false,
         queued = false,
-        goToRegion = true
+        goToRegion = true,
+        guano = undefined
     }) {
         fileLoaded = true, locationID = location;
+        clearTimeout(loadingTimeout)
+        // Clear the loading animation
+        const loading = document.getElementById('loadingOverlay')
+        loading.classList.add('d-none');
         const resetSpec = !currentFile;
         currentFileDuration = sourceDuration;
         //if (preserveResults) completeDiv.hide();
@@ -2974,6 +3077,7 @@ function onChartData(args) {
             NEXT_BUFFER = undefined;
             if (currentFile !== file) {
                 currentFile = file;
+                STATE.guano = guano;
                 renderFilenamePanel();
                 fileStart = start;
                 fileEnd = new Date(fileStart + (currentFileDuration * 1000));
@@ -3089,8 +3193,6 @@ function onChartData(args) {
             if (!activeRow) {
                 // Select the first row
                 activeRow = table.querySelector('tr:first-child');
-                activeRow?.classList.add('table-active');
-                //document.getElementById('resultsDiv').scrollTo({ top: 0, left: 0, behavior: "smooth" });
             }
         }
         
@@ -3129,9 +3231,9 @@ function onChartData(args) {
         const duration = STATE.selection ? STATE.selection.end - STATE.selection.start : DIAGNOSTICS['Audio Duration'];
         const rate = duration / analysisTime;
         
-        trackEvent(config.UUID, `${config.model}-${config.backend}`, 'Audio Duration', config.backend, Math.round(duration));
-        trackEvent(config.UUID, `${config.model}-${config.backend}`, 'Analysis Duration', config.backend, parseInt(analysisTime));
-        trackEvent(config.UUID, `${config.model}-${config.backend}`, 'Analysis Rate', config.backend, parseInt(rate));
+        trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Audio Duration', config[config.model].backend, Math.round(duration));
+        trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Duration', config[config.model].backend, parseInt(analysisTime));
+        trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Rate', config[config.model].backend, parseInt(rate));
         
         if (! STATE.selection){
             DIAGNOSTICS['Analysis Duration'] = analysisTime + ' seconds';
@@ -3761,7 +3863,7 @@ function onChartData(args) {
         filterIconDisplay();
     }
     
-    // DOM.audioFiltersIcon.addEventListener('click', toggleFilters);
+
     
     const toggleContextAwareMode = () => {
         if (config.model !== 'birdnet') config.detect.contextAware = !config.detect.contextAware;
@@ -3770,7 +3872,7 @@ function onChartData(args) {
         if (config.detect.contextAware) {
             SNRSlider.disabled = true;
             config.filters.SNR = 0;
-        } else if (config.backend !== 'webgl'  && config.model !== 'birdnet') {
+        } else if (config[config.model].backend !== 'webgl'  && config.model !== 'birdnet') {
             SNRSlider.disabled = false;
             config.filters.SNR = parseFloat(SNRSlider.value);
         }
@@ -3781,7 +3883,7 @@ function onChartData(args) {
         });
         updatePrefs('config.json', config)
     }
-    //DOM.contextAwareIcon.addEventListener('click', toggleContextAwareMode)
+
     
     DOM.debugMode.addEventListener('click', () =>{
         config.debug = !config.debug;
@@ -3789,6 +3891,11 @@ function onChartData(args) {
         updatePrefs('config.json', config)
     })
     
+    
+    //DOM.nocmigButton.addEventListener('click', changeNocmigMode);
+    //const fullscreen = document.getElementById('fullscreen');
+    
+
     //DOM.nocmigButton.addEventListener('click', changeNocmigMode);
     //const fullscreen = document.getElementById('fullscreen');
     
@@ -3804,15 +3911,13 @@ function onChartData(args) {
         adjustSpecDims(true, 512);
     }
     
-    //fullscreen.addEventListener('click', toggleFullscreen);
-    
     
     const diagnosticMenu = document.getElementById('diagnostics');
     diagnosticMenu.addEventListener('click', async function () {
         DIAGNOSTICS['Model'] = DOM.modelToUse.options[DOM.modelToUse.selectedIndex].text;
-        DIAGNOSTICS['Backend'] = config.backend;
-        DIAGNOSTICS['Batch size'] = config[config.backend].batchSize;
-        DIAGNOSTICS['Threads'] = config[config.backend].threads;
+        DIAGNOSTICS['Backend'] = config[config.model].backend;
+        DIAGNOSTICS['Batch size'] = config[config[config.model].backend].batchSize;
+        DIAGNOSTICS['Threads'] = config[config[config.model].backend].threads;
         DIAGNOSTICS['Context'] = config.detect.contextAware;
         DIAGNOSTICS['SNR'] = config.filters.SNR;
         DIAGNOSTICS['List'] = config.list;
@@ -4341,7 +4446,10 @@ DOM.gain.addEventListener('input', () => {
             case 'export-audio': { exportAudio(); break }
             case 'exit': { exitApplication(); break }
 
-            case 'save2db': { worker.postMessage({ action: 'save2db', file: currentFile }); break }
+            case 'save2db': { 
+                worker.postMessage({ action: 'save2db', file: currentFile }); 
+                if (config.archive.auto) document.getElementById('compress-and-organise').click();
+                break }
             case 'export2audio': { batchExportAudio(); break }
             case 'dataset': { worker.postMessage({ action: 'create-dataset', species: isSpeciesViewFiltered(true) }); break }
 
@@ -4355,6 +4463,7 @@ DOM.gain.addEventListener('input', () => {
             case 'locate-missing-file': {
                 (async () => await locateFile(MISSING_FILE))(); 
                 break }
+            case 'compress-and-organise': {compressAndOrganise(); break}
             case 'purge-file': { deleteFile(currentFile); break }
 
             case 'keyboardHelp': { (async () => await populateHelpModal('Help/keyboard.html', 'Keyboard shortcuts'))(); break }
@@ -4364,7 +4473,21 @@ DOM.gain.addEventListener('input', () => {
             case 'species': { worker.postMessage({action: 'get-valid-species', file: currentFile}); break }
             case 'startTour': { prepTour(); break }
             case 'eBird': { (async () => await populateHelpModal('Help/ebird.html', 'eBird Record FAQ'))(); break }
-
+            case 'archive-location-select': {
+                (async () =>{
+                    const files = await window.electron.selectDirectory()
+                    if (! files.canceled) {
+                        const archiveFolder = files.filePaths[0];
+                        config.archive.location = archiveFolder;
+                        exploreLink.classList.contains('disabled') || 
+                            document.getElementById('compress-and-organise').classList.remove('disabled');
+                        document.getElementById('archive-location').value = archiveFolder;
+                        updatePrefs('config.json', config);
+                        worker.postMessage({action: 'update-state', archive: config.archive})
+                    }
+                })();
+                break;
+            }
             case 'export-list': { exportSpeciesList(); break }
 
             case 'sort-position':
@@ -4496,48 +4619,27 @@ DOM.gain.addEventListener('input', () => {
                     worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone, file:currentFile});
                     break;
                 }
-                case 'timelineSetting': {
-                    timelineToggle(e);
+                case 'timelineSetting': { timelineToggle(e); break }
+                case 'nocmig': { changeNocmigMode(e); break }
+
+                case 'auto-archive': { config.archive.auto = element.checked; break }
+                case 'archive-format': {
+                    config.archive.format = document.getElementById('archive-format').value;
+                    worker.postMessage({action: 'update-state', archive: config.archive})
                     break;
                 }
-                case 'nocmig': {
-                    changeNocmigMode(e);
-                    break;
-                }
-                case 'confidenceValue':
-                case 'confidence': {
-                    handleThresholdChange(e);
-                    break;
-                }
-                case 'context' : {
-                    toggleContextAwareMode(e);
-                    break;
-                }
-                case 'attenuation': {
-                    handleAttenuationchange(e);
-                    break;
-                }
+                case 'confidenceValue': case 'confidence': { handleThresholdChange(e); break }
+                case 'context' : { toggleContextAwareMode(e); break }
+                case 'attenuation': { handleAttenuationchange(e); break }
                 case 'do-not-track': {
                     config.track = !element.checked;
                     worker.postMessage({ action: 'update-state', track: config.track })
                     break;
                 }
-                case 'lowShelfFrequency': {
-                    handleLowShelfchange(e);
-                    break;
-                }
-                case 'HighPassFrequency' : {
-                    handleHPchange(e);
-                    break;
-                }
-                case 'snrValue' : {
-                    handleSNRchange(e);
-                    break;
-                }
-                case 'audio-notification': {
-                    config.audio.notification = element.checked;
-                    break;
-                }
+                case 'lowShelfFrequency': { handleLowShelfchange(e); break }
+                case 'HighPassFrequency' : { handleHPchange(e); break }
+                case 'snrValue' : { handleSNRchange(e); break }
+                case 'audio-notification': { config.audio.notification = element.checked; break }
                 case 'power-save-block': {
                     config.powerSaveBlocker = element.checked;
                     powerSave(config.powerSaveBlocker);
@@ -4577,22 +4679,22 @@ DOM.gain.addEventListener('input', () => {
                     DOM.customListFile.value = config.customListFile[config.model];
                     DOM.customListFile.value ? LIST_MAP.custom = 'Using a custom list' : delete LIST_MAP.custom;
                     document.getElementById('locale').value = config[config.model].locale;
-                    config.backend = config.hasNode ? 'tensorflow' : 'webgpu';
-                    document.getElementById(config.backend).checked = true;
-                    handleBackendChange(config.backend);
+                    //config[config.model].backend = config.hasNode ? 'tensorflow' : 'webgpu';
+                    document.getElementById(config[config.model].backend).checked = true;
+                    handleBackendChange(config[config.model].backend);
                     setListUIState(config.list)
                     break;
                 }
                 case 'thread-slider': {
                         // number of threads
                     DOM.numberOfThreads.textContent = DOM.threadSlider.value;
-                    config[config.backend].threads = DOM.threadSlider.valueAsNumber;
+                    config[config[config.model].backend].threads = DOM.threadSlider.valueAsNumber;
                     loadModel();
                     break;
                 }
                 case 'batch-size': {
                     DOM.batchSizeValue.textContent = BATCH_SIZE_LIST[DOM.batchSizeSlider.value].toString();
-                    config[config.backend].batchSize = BATCH_SIZE_LIST[element.value];
+                    config[config[config.model].backend].batchSize = BATCH_SIZE_LIST[element.value];
                     loadModel();
                     // Reset region maxLength
                     initRegion();
@@ -4617,11 +4719,7 @@ DOM.gain.addEventListener('input', () => {
                     }
                     break;
                 }
-                case 'window-function':
-                case 'loud-color':
-                case 'mid-color':
-                case 'quiet-color':
-                case 'color-threshold-slider': {
+                case 'window-function': case 'loud-color': case 'mid-color': case 'quiet-color': case 'color-threshold-slider': {
                     const windowFn = document.getElementById('window-function').value;
                     const loud = document.getElementById('loud-color').value;
                     const mid = document.getElementById('mid-color').value;
@@ -4660,8 +4758,7 @@ DOM.gain.addEventListener('input', () => {
                     }
                     break;
                 }
-                case 'fromInput':
-                case 'fromSlider': {
+                case 'fromInput': case 'fromSlider': {
                     config.audio.minFrequency = Math.max(element.valueAsNumber, 0);
                     DOM.fromInput.value = config.audio.minFrequency;
                     DOM.fromSlider.value = config.audio.minFrequency;
@@ -4673,8 +4770,7 @@ DOM.gain.addEventListener('input', () => {
                     worker.postMessage({action: 'update-state', audio: config.audio});
                     break;
                 }
-                case 'toInput':
-                case 'toSlider': {
+                case 'toInput': case 'toSlider': {
                     config.audio.maxFrequency = Math.min(element.valueAsNumber, 11950);
                     DOM.toInput.value = config.audio.maxFrequency;
                     DOM.toSlider.value = config.audio.maxFrequency;
@@ -4861,7 +4957,7 @@ async function readLabels(labelFile, updating){
                 }
             })
         }
-        if (activeRow && (region?.attributes.label || hideInSummary)) {}
+        if (inSummary || activeRow && (region?.attributes.label || hideInSummary)) {}
         else {
             const xc = document.getElementById('context-xc');
             xc.classList.add('d-none');
@@ -5030,6 +5126,13 @@ async function readLabels(labelFile, updating){
             renderFilenamePanel()
         }
     }
+
+    function compressAndOrganise(){
+        worker.postMessage({
+            action: 'compress-and-organise'
+        })
+    }
+
     // Utility functions to wait for file to load
     function delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -5126,12 +5229,14 @@ async function readLabels(labelFile, updating){
     // Function to display update download progress
     const tracking = document.getElementById('update-progress');
     const updateProgressBar = document.getElementById('update-progress-bar');
-    window.electron.onDownloadProgress((_event, progressObj) => {
+    const displayProgress = (progressObj, text) => {
+        tracking.firstChild.nodeValue = text;
         tracking.classList.remove('d-none')
         // Update your UI with the progress information
         updateProgressBar.value = progressObj.percent;
-        if (progressObj.percent > 99) tracking.classList.add('d-none')
-    });
+        if (progressObj.percent > 99.9) tracking.classList.add('d-none')
+    }
+    window.electron.onDownloadProgress((_event, progressObj) => displayProgress(progressObj, 'Downloading the latest update: '));
     
     // CI functions
     const getFileLoaded = () => fileLoaded;
@@ -5285,6 +5390,7 @@ async function getXCComparisons(){
     if (XCcache[sname]) renderComparisons(XCcache[sname], cname);
     else {
         const loading = document.getElementById('loadingOverlay')
+        loading.querySelector('#loadingText').textContent = 'Loading Xeno-Canto data...';
         loading.classList.remove('d-none');
         const quality = '' //'+q:%22>C%22';
         const length = '+len:3-15';
@@ -5404,7 +5510,7 @@ function renderComparisons(lists, cname){
         </div>
     `;
     compareDiv.innerHTML = compareHTML;
-    const indicatorList = compareDiv.querySelector('.carousel-indicators');
+    //const indicatorList = compareDiv.querySelector('.carousel-indicators');
     const callTypeHeader = compareDiv.querySelector('#callTypeHeader');
     const recordings = compareDiv.querySelector('#recordings');
     let count = 0;
