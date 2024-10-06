@@ -96,7 +96,6 @@ let NUM_WORKERS;
 let workerInstance = 0;
 let appPath, BATCH_SIZE, LABELS, batchChunksToSend = {};
 let LIST_WORKER;
-const DEBUG = true;
 
 const DATASET = false;
 const adding_chirpity_additions = true;
@@ -159,7 +158,6 @@ const createDB = async (file) => {
     await db.runAsync('CREATE TABLE calls (id INTEGER PRIMARY KEY, callType TEXT)');
     await db.runAsync('INSERT INTO calls VALUES (0, NULL), (1, "call"), (2, "flight call"), (3, "song"), (4, "booming")');
     await db.runAsync('CREATE TABLE species(id INTEGER PRIMARY KEY, sname TEXT NOT NULL, cname TEXT NOT NULL, call_id INTEGER, UNIQUE (sname, call_id), CONSTRAINT fk_calltype FOREIGN KEY (call_id) REFERENCES calls(id))');
-    await db.runAsync(`CREATE TABLE files(id INTEGER PRIMARY KEY, name TEXT,duration  REAL,filestart INTEGER, locationID INTEGER, UNIQUE (name))`);
     await db.runAsync(`CREATE TABLE locations( id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon  REAL NOT NULL, place TEXT NOT NULL, UNIQUE (lat, lon))`);
     await db.runAsync(`CREATE TABLE files(id INTEGER PRIMARY KEY, name TEXT NOT NULL, duration REAL,filestart INTEGER, locationID INTEGER, archiveName TEXT, metadata TEXT, UNIQUE (name),
         CONSTRAINT fk_locations FOREIGN KEY (locationID) REFERENCES locations(id) ON DELETE SET NULL)`);
@@ -982,7 +980,7 @@ async function locateFile(file) {
     if (!matchingFileExt) {
         // Check if the file has been archived
         const row = await STATE.db.getAsync('SELECT archiveName from files WHERE name = ?', file);
-        const fullPathToFile = p.join(STATE.archive.location, row.archiveName)
+        const fullPathToFile = p.join(STATE.archive.location, row.archiveName || '')
         if (row.archiveName && fs.existsSync(fullPathToFile)) {
             //METADATA[row.archiveName] = METADATA[file];
             return fullPathToFile;
