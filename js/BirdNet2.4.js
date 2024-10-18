@@ -24,7 +24,10 @@ onmessage = async (e) => {
     let response;
     try {
         switch (modelRequest) {
-
+            case 'change-batch-size': {
+                myModel.warmUp(e.data.batchSize);
+                break;
+            }
             case "load": {
                 const version = e.data.model;
                 DEBUG && console.log("load request to worker");
@@ -71,7 +74,7 @@ onmessage = async (e) => {
                 break;
             }
             case "predict": {
-                if (myModel.model_loaded) {
+                if (myModel?.model_loaded) {
                     const { chunks, start, fileStart, file, snr, confidence, worker, context, resetResults } = e.data;
                     myModel.useContext = context;
                     myModel.selection =  !resetResults;

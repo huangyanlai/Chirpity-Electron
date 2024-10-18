@@ -39,14 +39,17 @@ ipcRenderer.once('provide-worker-channel', async (event) => {
     window.postMessage('provide-worker-channel', '/', event.ports)
 })
 
-
+ipcRenderer.on('error', (event, errorMessage) => {
+    console.error('Uncaught Exception from main process:', errorMessage);
+    alert('Uncaught Exception from main process:', errorMessage)
+  });
 
 contextBridge.exposeInMainWorld('electron', {
     requestWorkerChannel: () => ipcRenderer.invoke('request-worker-channel'),
     unsavedRecords: (isTrue) => ipcRenderer.invoke('unsaved-records', { newValue: isTrue }),
     onDownloadProgress: (callback) => ipcRenderer.on('download-progress', callback),
     saveFile: (args) => ipcRenderer.invoke('saveFile', args),
-    selectDirectory: () => ipcRenderer.invoke('selectDirectory'),
+    selectDirectory: (path) => ipcRenderer.invoke('selectDirectory', path),
     openDialog: (method, config) => ipcRenderer.invoke('openFiles', method, config),
     getPath: () => ipcRenderer.invoke('getPath'),
     getTemp: () => ipcRenderer.invoke('getTemp'),

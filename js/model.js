@@ -55,6 +55,7 @@ function loadModel(params){
 
         // Create a mask tensor where the specified indexes are set to 0 and others to 1
         const indexesToZero = [25, 30, 110, 319, 378, 403, 404, 405, 406];
+
         myModel.mask = tf.tensor2d(Array.from({ length: 408 }, (_, i) => indexesToZero.includes(i) ? 0 : 1), [1, 408]);
         myModel.labels = labels;
         await myModel.loadModel();
@@ -76,12 +77,16 @@ onmessage = async (e) => {
     let response;
     try {
         switch (modelRequest) {
+            case 'change-batch-size': {
+                myModel.warmUp(e.data.batchSize)
+                break;
+            }
             case "load": {
                 loadModel(e.data)
                 break;
                 }
             case "predict": {
-                if (! myModel.model_loaded) { return console.log("worker", worker, "received a prediction request before it was ready") }
+                if (! myModel?.model_loaded) { return console.log("worker", worker, "received a prediction request before it was ready") }
                 const { chunks, start, fileStart, file, snr, confidence, context, resetResults } = e.data;
                 myModel.useContext = context;
                 myModel.selection =  !resetResults;
@@ -264,8 +269,8 @@ class Model {
         // const TensorBatch = this.fixUpSpecBatch(specs); // + 1 tensor
         // specs.dispose(); // - 1 tensor
         let paddedTensorBatch, maskedTensorBatch;
-        if (BACKEND === 'webgl' && TensorBatch.shape[0] < this.batchSize) {
-            // GPU backends work best when all batches are the same size
+        if (BACKEND === 'webgl' && TensorBatch.shape[0] < this.batchSize && !this.selection) {
+            // WebGL backend works best when all batches are the same size
             paddedTensorBatch = this.padBatch(TensorBatch)  // + 1 tensor
         } else if (threshold) {
             if (this.version !== 'v1') threshold *= 4;
@@ -302,7 +307,23 @@ class Model {
         }
 
         const tb = paddedTensorBatch || maskedTensorBatch || TensorBatch;
-        const prediction = this.model.predict(tb, { batchSize: this.batchSize })
+        const rawPrediction = this.model.predict(tb, { batchSize: this.batchSize })
+
+        // Zero prediction values for silence
+        const zerosMask = tf.tidy(() => {
+            // Get the max value for each tensor in the batch
+            const maxValues = tb.max([1,2]);
+            // Create a mask where max value is zero (true for tensors with max > 0)
+            return maxValues.notEqual(0);
+        });
+        // Set predictions to zero for the tensors where the max value was zero
+        const prediction = tf.tidy(() => {
+            return rawPrediction.mul(zerosMask);
+        });
+        // Dispose tensors after using them to avoid memory leaks
+        zerosMask.dispose();
+        rawPrediction.dispose();
+
         let newPrediction;
         if (this.selection) {
             newPrediction = tf.max(prediction, 0, true);
