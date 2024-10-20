@@ -1789,7 +1789,7 @@ const convertSpecsFromExistingSpecs = async (path) => {
 }
             
 const saveResults2DataSet = ({species, included}) => {
-    const exportType = 'audio';
+    const exportType = 'png';
     const rootDirectory = DATASET_SAVE_LOCATION;
     sampleRate = STATE.model === 'birdnet' ? 48_000 : 24_000;
     const height = 256, width = 384;
