@@ -1857,7 +1857,10 @@ const saveResults2DataSet = ({species, included}) => {
                     DEBUG && console.log("skipping file as it is already saved")
                 } else {
                     end = Math.min(end, result.duration);
-                    if (exportType === 'audio') saveAudio(result.file, start, end, file.replace('.png', '.wav'), {Artist: 'Chirpity'}, filepath)
+                    if (exportType === 'audio') {
+                        if (!fs.existsSync(filepath)) fs.mkdirSync(filepath, {recursive: true})
+                        saveAudio(result.file, start, end, file.replace('.png', '.wav'), {Artist: 'Chirpity'}, filepath)
+                    }
                     else {
                         const AudioBuffer = await fetchAudioBuffer({
                             start: start, end: end, file: result.file

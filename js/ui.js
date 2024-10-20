@@ -1367,10 +1367,10 @@ async function showAnalyse() {
 };
 
 
-// const datasetLink = document.getElementById('dataset');
-// datasetLink.addEventListener('click', async () => {
-//     worker.postMessage({ action: 'create-dataset', species: isSpeciesViewFiltered(true) });
-// });
+const datasetLink = document.getElementById('dataset');
+datasetLink.addEventListener('click', async () => {
+    worker.postMessage({ action: 'create-dataset', species: isSpeciesViewFiltered(true) });
+});
 
 const checkWidth = (text) => {
     // Create a temporary element to measure the width of the text
