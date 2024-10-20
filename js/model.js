@@ -117,7 +117,7 @@ onmessage = async (e) => {
                 const bufferTensor = myModel.normalise_audio(signal);
                 signal.dispose();
                 const imageTensor = tf.tidy(() => {
-                    return myModel.makeSpectrogram(bufferTensor);
+                    return myModel.makeSpectrogramPNG(bufferTensor);
                 });
                 image = tf.tidy(() => {
                     let spec = myModel.fixUpSpecBatch(tf.expandDims(imageTensor, 0), spec_height, spec_width);
@@ -130,7 +130,7 @@ onmessage = async (e) => {
                     message: "spectrogram",
                     width: myModel.inputShape[2],
                     height: myModel.inputShape[1],
-                    channels: myModel.inputShape[3],
+                    channels: 3, //myModel.inputShape[3],
                     image: image,
                     file: specFile,
                     filepath: filepath,
@@ -203,6 +203,34 @@ class Model {
         return true;
     }
 
+        
+    // Helper function to normalise each channel independently to range [0, 255]
+    normalizeMagnitude(spec) {
+        const spec_max = tf.max(spec)
+        // if (this.version === 'v4'){
+        //     const spec_min = tf.min(spec, [1, 2], true)
+        //     spec = tf.sub(spec, spec_min).div(tf.sub(spec_max, spec_min));
+        // } else {
+            spec = spec.mul(255);
+            spec = spec.div(spec_max);
+        // }
+        return spec
+    }
+
+    normalizeRealOrImaginary(spec) {
+        const min = tf.min(spec)
+        spec = spec.add(tf.abs(min))
+        const max = tf.max(spec)
+        spec = spec.div(max)
+        // if (this.version === 'v4'){
+        //     const spec_min = tf.min(spec, [1, 2], true)
+        //     spec = tf.sub(spec, spec_min).div(tf.sub(spec_max, spec_min));
+        // } else {
+
+            spec = spec.mul(255);
+        // }
+        return spec
+    }
     normalise(spec) {
         return tf.tidy(() => {
              const spec_max = tf.max(spec, [1, 2], true)
@@ -352,6 +380,33 @@ class Model {
         return [keys, topIndices, topValues];
     }
 
+    makeSpectrogramPNG(signal) {
+        return tf.tidy(() => {
+            // Compute the STFT of the signal
+            let stftResult = tf.signal.stft(signal, this.frame_length, this.frame_step);
+            
+            // Calculate the magnitude, real and imaginary components
+            let magnitude = tf.abs(stftResult);
+            let realPart = tf.real(stftResult);
+            let imagPart = tf.imag(stftResult);
+            magnitude = this.normalizeMagnitude(magnitude);
+            realPart = this.normalizeRealOrImaginary(realPart);
+            imagPart = this.normalizeRealOrImaginary(imagPart);
+            const minReal = tf.min(realPart).dataSync()
+            const maxReal = tf.max(realPart).dataSync()
+            const minImag = tf.min(imagPart).dataSync()
+            const maxImag = tf.max(imagPart).dataSync()
+            // magnitude = this.normalizeChannelsIndependently(magnitude);
+            // Stack the magnitude, real, and imaginary parts along the channel axis
+            let rgbImage = tf.stack([magnitude, realPart, imagPart], -1);
+            // Normalise each channel independently to [0, 255]
+            //let normalizedImage = this.normalise(rgbImage);  
+            signal.dispose();
+            return rgbImage;
+        });
+    }
+
+    
     makeSpectrogram(signal) {
         return tf.tidy(() => {
             let spec = tf.abs(tf.signal.stft(signal, this.frame_length, this.frame_step));
@@ -368,10 +423,10 @@ class Model {
             */
             //specBatch = tf.log1p(specBatch).mul(20);
             // Swap axes to fit output shape
-            specBatch = tf.transpose(specBatch, [0, 2, 1]);
+            specBatch = tf.transpose(specBatch, [0, 2, 1, 3]);
             specBatch = tf.reverse(specBatch, [1]);
             // Add channel axis
-            specBatch = tf.expandDims(specBatch, -1);
+            //specBatch = tf.expandDims(specBatch, -1);
             //specBatch = tf.slice4d(specBatch, [0, 1, 0, 0], [-1, img_height, img_width, -1]);
             specBatch = tf.image.resizeBilinear(specBatch, [img_height, img_width], true);
             return  this.normalise(specBatch)
