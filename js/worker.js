@@ -175,6 +175,24 @@ const setupFfmpegCommand = ({
     }
     return command;
 };
+function parseCname(cname){
+    let callType = 0; // Default to zero
+
+    if (cname.endsWith(' (call)')) {
+        callType = 1;
+        cname = cname.slice(0, -7); // Remove the last 7 characters (length of ' (call)')
+    } else if (cname.endsWith(' (flight call)')) {
+        callType = 2;
+        cname = cname.slice(0, -14); // Remove the last 14 characters (length of ' (flight call)')
+    } else if (cname.endsWith(' (song)')) {
+        callType = 3;
+        cname = cname.slice(0, -7); // Remove the last 7 characters (length of ' (song)')
+    } else if (cname.endsWith(' (booming)')) {
+        callType = 4;
+        cname = cname.slice(0, -10); // Remove the last 10 characters (length of ' (booming)')
+    }
+    return [cname, callType];
+}
 
 const getSelectionRange = (file, start, end) => {
     return { start: (start * 1000) + METADATA[file].fileStart, end: (end * 1000) + METADATA[file].fileStart }
@@ -206,7 +224,8 @@ const createDB = async (file) => {
     if (archiveMode) {
         for (let i = 0; i < LABELS.length; i++) {
             const [sname, cname] = LABELS[i].split('_');
-            await db.runAsync('INSERT INTO species VALUES (?,?,?)', i, sname, cname);
+            const [common, callType] = parseCname(cname);
+            await db.runAsync('INSERT INTO species VALUES (?,?,?, ?)', i, sname, common, callType);
         }
     } else {
         const filename = diskDB.filename;
@@ -252,7 +271,7 @@ async function loadDB(path) {
     // Add Unknown Sp.
     modelLabels.push("Unknown Sp._Unknown Sp.");
     LABELS = modelLabels; // these are the default english labels
-    const file = dataset_database ? p.join(path, `archive_dataset${num_labels}.sqlite`) : p.join(path, `archive${num_labels}.sqlite`)
+    const file = dataset_database ? p.join(path, `archive_dataset.sqlite`) : p.join(path, `archive.sqlite`)
 
     if (!fs.existsSync(file)) {
         await createDB(file);
