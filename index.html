@@ -78,11 +78,11 @@
                 <fieldset class="border border-secondary rounded m-2 mt-0 mb-0 p-2">
                     <legend style="font-size: large;font-weight:bold">Detections</legend>
                     <div>
-                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Model" id="Model-circle-help"  data-bs-content="Select whether to use Chirpity, optimised for Nocturnal Migration Calls in Europe, or BirdNET, which can detect over 6000 species across the globe.">?</a>
+                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Model" id="Model-circle-help"  data-bs-content="Select whether to use the Nocmig model, optimised for Nocturnal Migration Calls in Europe, or BirdNET, which can detect over 6000 species across the globe.">?</a>
                         <div class="pe-3 input-group rounded p-2 mb-1">
                             <label class="input-group-text col-5" for="model-to-use">Model:</label>
                             <select class="form-select mb-0" id="model-to-use">
-                                <option value="chirpity">Chirpity</option>
+                                <option value="chirpity">Nocmig</option>
                                 <option value="birdnet">BirdNet</option>
                             </select>
                         </div>
@@ -149,6 +149,23 @@
                             <label class="form-check-label" for="nocmig">Only analyse night time periods.</label>
                             <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Nocmig Mode" id="Nocmig Mode-circle-help"  data-bs-content="When enabled, this 'Nocmig mode' only searches for and only displays detections found during the night">?</a>
                         </div>
+                    </div>
+                    <hr>
+                    <div class="form-group rounded p-2 pe-0 mb-2">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="iucn">
+                            <label class="form-check-label" for="iucn">Show species IUCN Red List status in summary.</label>
+                            <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Red List Status" id="IUCN-circle-help"  
+                                data-bs-content="When enabled, the latest Global IUCN assessment status is displayed for each species in the summary. The icon links to the assessment page on the IUCN website. The Assessment Scope will display the IUCN assessment of the species in that region (where available).">?</a>
+                        </div>
+                    </div>
+                    <div class="pe-3 input-group rounded p-2 mb-1">
+                        <label for="iucn-scope" class="input-group-text col-5">Assessment Scope:</label>
+                        <select class="form-select mb-0" id="iucn-scope">
+                            <option value="Global">Global</option>
+                            <option value="Europe">Europe</option>
+                            <option value="Mediterranean">Mediterranean</option>
+                        </select>
                     </div>
                     <hr>
                     <div class="form-group rounded">
@@ -303,6 +320,7 @@
                             </div>
                         </div>
                     </div>
+                    <hr>
                     <div class="form-group rounded p-2 mb-2">
                         <div class="col form-check form-switch">
                             <label class="form-check-label" for="normalise">Normalise Audio
@@ -311,9 +329,10 @@
                             <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Normalise" id="Normalise-circle-help"  data-bs-content="When enabled, the audio you hear will be normalised, expanding the dynamic range.">?</a>
                         </div>
                     </div>
+                    <hr>
                     <div class="me-auto">
                         <div class="form-group rounded p-2 mb-2">
-                            <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="High Pass Filter" id="High Pass Filter-circle-help"  data-bs-content="When set, removes low frequency noise below the threshold. If enabled before analysis, the modified audio is sent to the model. If only enabled after analysis, this just affects audio playback">?</a>
+                            <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="High Pass Filter" id="High Pass Filter-circle-help"  data-bs-content="When set, removes low frequency noise below the threshold.">?</a>
                             <label for="HighPassFrequency" class="form-label">
                                 High Pass filter:
                             </label>
@@ -325,11 +344,11 @@
                             </div>
                         </div>
                     </div>
+                    <hr>
+                    <h6>Low Shelf filter</h6>
                     <div class="form-group rounded p-2 me-0 mb-2">
-                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Low Shelf Filter" id="Low Shelf Filter-circle-help"  data-bs-content="When used, attenuates low frequency noise below the frequency threshold. If enabled before analysis, the modified audio is sent to the model. If only enabled after analysis, this just affects audio playback">?</a>
-                        <label for="lowShelfFrequency" class="form-label">
-                            Low Shelf filter:
-                        </label>
+                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Low Shelf Filter" id="Low Shelf Filter-circle-help"  data-bs-content="When used, attenuates low frequency noise below the cut-off frequency.">?</a>
+                        <label for="lowShelfFrequency" class="form-label">Cut-off Frequency:</label>
                         <div class="input-group me-0 p-0">
                             <input type="range" class="form-control-range w-75" min="0" max="2500" step="100" id="lowShelfFrequency">
                             <div class="input-group-append">
@@ -546,13 +565,15 @@
                                 Context mode
                             </label>
                             <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Context Mode" id="Context Mode-circle-help"  data-bs-content="When enabled, context mode adapts predictions by analysing the surrounding context.
-                            Not available in the BirdNET model">?</a>
+                            It can only be changed prior to an analysis, and a low initial confidence threshold is recommended e.g 20-30%. Context mode is not available in the BirdNET model">?</a>
                         </div>
                     </div>
-                    <div class="chirpity-only me-auto">
+                    <!-- <div class="chirpity-only me-auto"> -->
+                    <div class="d-none me-auto">
                         <div class="form-group rounded p-2 mb-2">
-                            <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Signal to Noise Ratio" id="Signal to Noise Ratio-circle-help"  data-bs-content="Skip over portions of audio with just background noise. Higher values skip increasingly noisy segments.
-                            Not available in the BirdNET model">?</a>
+                            <a class="circle text-bg-danger" tabindex="-1" data-bs-toggle="popover" data-bs-html="true" data-bs-trigger="focus" data-bs-title="Signal to Noise Ratio" id="Signal to Noise Ratio-circle-help"  data-bs-content="The SNR filter, when enabled, will skip over portions of audio where any audio event is below the threshold. Higher values skip increasingly noisy segments. 
+                            whilst this will result in faster processing it must be considered <b><i>experimental</i></b> and any non-zero value may miss detections. <b>Tip:</b> To find a workable SNR value, run analysis on a short file with the faintest detections you can confidently identify. Increase the SNR value until the detection is not picked up. 
+                            Once you find this threshold, back it off to the highest level that picks up the detection.">?</a>
                             <label for="snrValue" class="form-label">
                                 SNR filter:
                             </label>
@@ -571,14 +592,6 @@
                                 <input class="form-check-input" type="checkbox" role="switch" id="debug-mode">
                                 <label class="form-check-label me-2" for="debug-mode">Debug mode</label><a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Debug Mode" id="Debug Mode-circle-help"  data-bs-content="Enter debug mode (changes to this setting require a Chirpity relaunch to take effect)">?</a>
                             </div>
-                        </div>
-                    </div>
-                    <div class="col-auto form-group rounded p-2 mb-2">
-                        <div class="text-nowrap">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" role="switch" id="do-not-track">
-                                <label class="form-check-label me-2" for="do-not-track">Opt out of usage analytics</label><a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Disable Tracking" id="Disable Tracking-circle-help"  data-bs-content="Chirpity collects anonymous system data to enhance user experience and aid bug tracking. If you do not want to share this information, you can disable it here.">?</a>
-                            </div>        
                         </div>
                     </div>
                     <div class="col-auto form-group rounded p-2 mb-2">
@@ -626,7 +639,7 @@
                                     <li>First off, set your location in the settings menu.</li>
                                     <li>Next, consider which model best suits your needs:</li>
                                     <ul>
-                                        <li><b>Chirpity</b> is tuned for nocturnal migration,<br> but only has birds on the British list</li>
+                                        <li><b>Nocmig</b> is tuned for nocturnal migration,<br> but only has birds on the British list</li>
                                         <li><b>BirdNET</b> is trained on global bird species</li>
                                     </ul>
                                 </ol>
@@ -642,7 +655,7 @@
                                     <ol class="text-start ps-5"> 
                                         <li>Nocmig mode</li>
                                         <li>Audio filters</li>
-                                        <li>Context-aware mode (Chirpity model only)</li>
+                                        <li>Context-aware mode (Nocmig model only)</li>
                                         <li>Frequency range adjustment for the spectrogram</li>
                                         <li>Which detection list to use</li>
                                         <li>And the confidence threshold</li>
@@ -847,7 +860,7 @@
                 data-bs-toggle="offcanvas" data-bs-target="#settings" aria-controls="settings">Settings <span class="material-symbols-outlined fs-5 align-middle">settings</span></button>
             </div>
             <!-- navbar-collapse.// -->
-            <img id="primaryLogo" src="img/logo/chirpity_logo2.png" alt="Chirpity bird calls: Identifying birds by sound">
+            <a href="https://chirpity.mattkirkland.co.uk" title="Visit the Chirpity website" target="_blank"><img id="primaryLogo" src="img/logo/chirpity_logo2.png" alt="Chirpity bird calls: Identifying birds by sound"></a>
         </div>
         <!-- container-fluid.// -->
     </nav>
@@ -1122,11 +1135,12 @@
                 </div>
                 <!-- Controls view -->
                 <div class="container-fluid p-1 text-bg-dark d-inline-flex" id="controlsWrapper" style="max-height: 50px" title="Drag to resize the Spectrogram window.">
-                    <a id="metadata" class="pointer pt-2 d-none" tabindex="-1" data-bs-custom-class="metadata-popover" data-bs-html="true" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="File Metadata" id="File Metadata-circle-help" >
+                    <a id="metadata" class="pointer pt-2 d-none" tabindex="-1" data-bs-custom-class="metadata-popover" data-bs-html="true" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="File Metadata">
                         <span class="material-symbols-outlined"  title="Display File Metadata">other_admission</span></a>
                     <div id="filename" class="col-auto ps-1 overflow-visible flex-nowrap"></div>
-                    <div id="unsaved-icon" class="material-symbols-outlined ms-2 me-2 text-warning pointer d-none"  tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Unsaved Edits" id="Unsaved Edits-circle-help"  data-bs-content="There are changes to the results that haven't been saved.">warning</div>
-                    <div class="btn-group bg-dark pt-0 p-1 ms-2 me-2 text-nowrap" role="group">
+                    <div id="unsaved-icon" class="material-symbols-outlined ms-2 me-2 text-warning pointer d-none"  tabindex="-1" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Unsaved Edits" data-bs-content="There are changes to the results that haven't been saved.">warning</div>
+                    <!-- <div class="col-4"> -->
+                    <div class="col btn-group bg-dark pt-0 p-1 ms-2 me-2 text-nowrap" role="group">
                         <button id="playToggle" class="p-1 pe-2 btn btn-outline-secondary" title="Play / Pause (SpaceBar)">
                             <span class="material-symbols-outlined ">play_circle</span><span
                             class="align-middle d-none d-lg-inline"> Play </span>
@@ -1137,17 +1151,16 @@
                     </div>
                     <div class="col btn-group bg-dark pt-0 p-1 pe-2" role="group">
                         <button id="zoomIn" title="Zoom into the spectrogram (Keyboard Shortcut: + key)" class="btn btn-outline-secondary"
-                        style="max-width: 70px">
+                        style="min-width: 3rem">
                         <span class="material-symbols-outlined zoom translate-middle">zoom_in</span>
-                    </button>
-                    <button id="zoomOut" title="Zoom out of the spectrogram (Keyboard Shortcut: - key)" class="btn btn-outline-secondary"
-                    style="max-width: 70px"><span class="material-symbols-outlined zoom  translate-middle">zoom_out</span>
-                </button>
-            </div>
-            <div id="progressDiv" class="col-2 d-none"><span id="fileNumber"></span><br>
+                        </button>
+                        <button id="zoomOut" title="Zoom out of the spectrogram (Keyboard Shortcut: - key)" class="btn btn-outline-secondary"
+                            style="min-width: 3rem"><span class="material-symbols-outlined zoom  translate-middle">zoom_out</span>
+                        </button>
+                    </div>
+                <!-- </div> -->
+            <div id="progressDiv" class="col-2 invisible"><span id="fileNumber"></span><br>
                 <progress id="progress-bar" max="100" style="width:90%"></progress>
-            </div>
-            <div id="complete" class="col-2 pe-2" style="display:none">
             </div>
             <div class="col pe-1">
 
@@ -1157,7 +1170,7 @@
                     <span style="max-width: 70px" id="audioFiltersIcon" title="Experimental audio filters applied"
                     class="material-symbols-outlined btn btn-outline-secondary p-1 pt-2">blur_on</span>
                     <span style="max-width: 70px" id="context-mode" title="Context Aware mode enabled"
-                    class="chirpity-only material-symbols-outlined btn btn-outline-secondary p-1 pt-2 text-warning">swap_horiz</span>
+                    class="chirpity-only material-symbols-outlined btn btn-outline-secondary p-1 pt-2">swap_horiz</span>
                     <span title="Adjust spectrogram frequency range" id="frequency-range"
                     class="material-symbols-outlined btn btn-outline-secondary p-1 pt-2">vertical_align_center</span>
                     <span style="max-width: 70px" id="list-icon" class="btn btn-outline-secondary p-1"><img

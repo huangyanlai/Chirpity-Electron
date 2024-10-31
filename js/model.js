@@ -172,7 +172,7 @@ class Model {
                 { weightPathPrefix: this.appPath });
             this.model_loaded = true;
             this.inputShape = [...this.model.inputs[0].shape];
-            }
+        }
     }
 
     async warmUp(batchSize) {
@@ -238,7 +238,7 @@ class Model {
 
     addContext(prediction, tensor, confidence) {
         // Create a set of images from the batch, offset by half the width of the original images
-        const [batchSize, height, width, channel] = tensor.shape;
+        const [_, height, width, channel] = tensor.shape;
         return tf.tidy(() => {
             const firstHalf = tensor.slice([0, 0, 0, 0], [-1, -1, width / 2, -1]);
             const secondHalf = tensor.slice([0, 0, width / 2, 0], [-1, -1, width / 2, -1]);
@@ -272,7 +272,7 @@ class Model {
         if (BACKEND === 'webgl' && TensorBatch.shape[0] < this.batchSize && !this.selection) {
             // WebGL backend works best when all batches are the same size
             paddedTensorBatch = this.padBatch(TensorBatch)  // + 1 tensor
-        } else if (threshold) {
+        } else if (threshold && BACKEND === 'tensorflow' && !this.selection) {
             if (this.version !== 'v1') threshold *= 4;
             const keysTensor = tf.stack(keys); // + 1 tensor
             const snr = this.getSNR(TensorBatch)
@@ -300,7 +300,7 @@ class Model {
                 if (DEBUG) console.log("No surviving tensors in batch", maskedTensorBatch.shape[0])
                 return []
             } else {
-                keys = await maskedKeysTensor.data();
+                keys = Array.from(await maskedKeysTensor.data());
                 maskedKeysTensor.dispose(); // - 1 tensor
                 if (DEBUG) console.log("surviving tensors in batch", maskedTensorBatch.shape[0])
             }

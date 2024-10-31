@@ -2,9 +2,7 @@
 const { ipcRenderer } = require('electron');
 const fs = require('node:fs');
 const p = require('node:path');
-const { writeFile, mkdir, readdir, stat } = require('node:fs/promises');
-const { PassThrough } = require('node:stream');
-const wavefileReader = require('wavefile-reader');
+const { writeFile, mkdir, readdir } = require('node:fs/promises');
 const SunCalc = require('suncalc');
 const ffmpeg = require('fluent-ffmpeg');
 const png = require('fast-png');
@@ -15,7 +13,13 @@ import { State } from './state.js';
 import { sqlite3 } from './database.js';
 import {trackEvent} from './tracking.js';
 import {extractWaveMetadata} from './metadata.js';
+let isWin32 = false;
 
+let ntsuspend;
+if (process.platform === 'win32') {
+    ntsuspend = require('ntsuspend');
+    isWin32 = true;
+  }
 const DEBUG = false;
 
 // Function to join Buffers and not use Buffer.concat() which leads to detached ArrayBuffers
@@ -31,6 +35,9 @@ function joinBuffers(buffer1, buffer2) {
 const originalWarn = console.warn;
 const originalError = console.error;
 
+const generateAlert =({message, type, autohide}) => {
+    UI.postMessage({event: 'generate-alert', type: type || 'info',  message: message, autohide: autohide});
+}
 function customURLEncode(str) {
     return encodeURIComponent(str)
       .replace(/[!'()*]/g, (c) => {
@@ -46,7 +53,7 @@ console.warn = function() {
     originalWarn.apply(console, arguments);
     
     // Track the warning message using your tracking function
-    STATE.track && trackEvent(STATE.UUID, 'Worker Warning', arguments[0], customURLEncode(arguments[1]));
+    trackEvent(STATE.UUID, 'Worker Warning', arguments[0], customURLEncode(arguments[1]));
 };
 
 // Override console.error to intercept and track errors
@@ -55,12 +62,12 @@ console.error = function() {
     originalError.apply(console, arguments);
     
     // Track the error message using your tracking function
-    STATE.track && trackEvent(STATE.UUID, 'Worker Handled Errors', arguments[0], customURLEncode(arguments[1]));
+    trackEvent(STATE.UUID, 'Worker Handled Errors', arguments[0], customURLEncode(arguments[1]));
 };
 // Implement error handling in the worker
 self.onerror = function(message, file, lineno, colno, error) {
-    STATE.track && trackEvent(STATE.UUID, 'Unhandled Worker Error', message, customURLEncode(error?.stack));
-    if (message.includes('dynamic link library')) UI.postMessage({event: 'generate-alert', type: 'error',  message: 'There has been an error loading the model. This may be due to missing AVX support. Chirpity AI models require the AVX2 instructions set to run. If you have AVX2 enabled and still see this notice, please refer to <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">this issue</a> on Github.'})
+    trackEvent(STATE.UUID, 'Unhandled Worker Error', message, customURLEncode(error?.stack));
+    if (message.includes('dynamic link library')) generateAlert({type: 'error',  message: 'There has been an error loading the model. This may be due to missing AVX support. Chirpity AI models require the AVX2 instructions set to run. If you have AVX2 enabled and still see this notice, please refer to <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">this issue</a> on Github.'})
     // Return false not to inhibit the default error handling
     return false;
     };
@@ -71,7 +78,7 @@ self.addEventListener('unhandledrejection', function(event) {
     const stackTrace = event.reason?.stack;
     
     // Track the unhandled promise rejection
-    STATE.track && trackEvent(STATE.UUID, 'Unhandled Worker Promise Rejections', errorMessage, customURLEncode(stackTrace));
+    trackEvent(STATE.UUID, 'Unhandled Worker Promise Rejections', errorMessage, customURLEncode(stackTrace));
 });
 
 self.addEventListener('rejectionhandled', function(event) {
@@ -80,7 +87,7 @@ self.addEventListener('rejectionhandled', function(event) {
     const stackTrace = event.reason?.stack;
     
     // Track the unhandled promise rejection
-    STATE.track && trackEvent(STATE.UUID, 'Handled Worker Promise Rejections', errorMessage, customURLEncode(stackTrace));
+    trackEvent(STATE.UUID, 'Handled Worker Promise Rejections', errorMessage, customURLEncode(stackTrace));
 });
 
 //Object will hold files in the diskDB, and the active timestamp from the most recent selection analysis.
@@ -90,7 +97,7 @@ const STATE = new State();
 let WINDOW_SIZE = 3;
 const SUPPORTED_FILES = ['.wav', '.flac', '.opus', '.m4a', '.mp3', '.mpga', '.ogg', '.aac', '.mpeg', '.mp4', '.mov'];
 
-let NUM_WORKERS;
+let NUM_WORKERS, AUDIO_BACKLOG;
 let workerInstance = 0;
 let appPath, tempPath, BATCH_SIZE, LABELS, batchChunksToSend = {};
 let LIST_WORKER;
@@ -124,7 +131,7 @@ const setupFfmpegCommand = ({
     end = undefined, 
     sampleRate = 24000, 
     channels = 1, 
-    format = 'wav', 
+    format = 's16le', //<= outputs audio without header
     additionalFilters = [],
     metadata = {},
     audioCodec = null,
@@ -132,8 +139,6 @@ const setupFfmpegCommand = ({
     outputOptions = []
 }) => {
     const command = ffmpeg('file:' + file)
-        .seekInput(start)
-        .duration(end - start)
         .format(format)
         .audioChannels(channels)
         .audioFrequency(sampleRate);
@@ -162,6 +167,7 @@ const setupFfmpegCommand = ({
     // Add any additional output options
     if (outputOptions.length) command.addOutputOptions(...outputOptions);
 
+    command.seekInput(start).duration(end - start)
     if (DEBUG){
         command.on('start', function (commandLine) {
             console.log('FFmpeg command: ' + commandLine);
@@ -169,7 +175,6 @@ const setupFfmpegCommand = ({
     }
     return command;
 };
-
 
 const getSelectionRange = (file, start, end) => {
     return { start: (start * 1000) + METADATA[file].fileStart, end: (end * 1000) + METADATA[file].fileStart }
@@ -194,23 +199,32 @@ const createDB = async (file) => {
         CONSTRAINT fk_locations FOREIGN KEY (locationID) REFERENCES locations(id) ON DELETE SET NULL)`);
     // Ensure place names are unique too
     await db.runAsync('CREATE UNIQUE INDEX idx_unique_place ON locations(lat, lon)');
-    await db.runAsync(`CREATE TABLE records( dateTime INTEGER, position INTEGER, fileID INTEGER, speciesID INTEGER, confidence INTEGER, label  TEXT,  comment  TEXT, end INTEGER, callCount INTEGER, isDaylight INTEGER, UNIQUE (dateTime, fileID, speciesID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE,  FOREIGN KEY (speciesID) REFERENCES species(id))`);
+    await db.runAsync(`CREATE TABLE records( dateTime INTEGER, position INTEGER, fileID INTEGER, speciesID INTEGER, confidence INTEGER, label  TEXT,  comment  TEXT, end INTEGER, callCount INTEGER, isDaylight INTEGER, 
+        UNIQUE (dateTime, fileID, speciesID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE,  FOREIGN KEY (speciesID) REFERENCES species(id))`);
     await db.runAsync(`CREATE TABLE duration( day INTEGER, duration INTEGER, fileID INTEGER, UNIQUE (day, fileID), CONSTRAINT fk_files FOREIGN KEY (fileID) REFERENCES files(id) ON DELETE CASCADE)`);
-    
-    await getLabelsFromConfig();
 
-    for (let i = 0; i < LABELS.length; i++) {
-        const [sname, cname] = LABELS[i].split('_');
-        const [common, callType] = parseCname(cname);
-        // We do this to ensure the index starts with 0
-        await db.runAsync('INSERT OR IGNORE INTO species VALUES (?, ?, ?, ?)', i, sname, common, callType);
-        DEBUG && console.log(`INSERT OR IGNORE INTO species VALUES (${i}, ${sname}, ${common}, ${callType})`)
+    if (archiveMode) {
+        for (let i = 0; i < LABELS.length; i++) {
+            const [sname, cname] = LABELS[i].split('_');
+            await db.runAsync('INSERT INTO species VALUES (?,?,?)', i, sname, cname);
+        }
+    } else {
+        const filename = diskDB.filename;
+        let { code } = await db.runAsync('ATTACH ? as disk', filename);
+        // If the db is not ready
+        while (code === "SQLITE_BUSY") {
+            console.log("Disk DB busy")
+            setTimeout(() => {}, 10);
+            let response = await db.runAsync('ATTACH ? as disk', filename);
+            code = response.code;
+        }
+        let response = await db.runAsync('INSERT INTO files SELECT * FROM disk.files');
+        DEBUG && console.log(response.changes + ' files added to memory database')
+        response = await db.runAsync('INSERT INTO locations SELECT * FROM disk.locations');
+        DEBUG && console.log(response.changes + ' locations added to memory database')
+        response = await db.runAsync('INSERT INTO species SELECT * FROM disk.species');
+        DEBUG && console.log(response.changes + ' species added to memory database')
     }
-    if (! archiveMode){
-        await db.runAsync( `ATTACH DATABASE "${diskDB.filename}" AS disk`);
-        await db.runAsync('INSERT INTO files SELECT * FROM disk.files');
-    } 
-
     await db.runAsync('END');
     return db
 }
@@ -361,48 +375,8 @@ let METADATA = {};
 let index = 0, AUDACITY = {}, predictionStart;
 let sampleRate; // Should really make this a property of the model
 let predictWorkers = [], aborted = false;
-let audioCtx;
-// Set up the audio context:
-function setAudioContext() {
-    audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: sampleRate });
-}
-
-
 let UI;
 let FILE_QUEUE = [];
-
-
-const dirInfo = async ({ folder = undefined, recursive = false }) => {
-    const files = await readdir(folder, { withFileTypes: true });
-    const ctimes = [];
-    const paths = files.map(async file => {
-        const path = p.join(folder, file.name);
-        if (file.isDirectory()) {
-            if (recursive) {
-                return await dirInfo({ folder: path, recursive: true })
-            } else {
-                return 0
-            }
-        }
-        if (file.isFile() || file.isSymbolicLink()) {
-            const { size, ctimeMs } = await stat(path);
-            ctimes.push([path, ctimeMs, size]);
-            return size
-            
-        }
-        return 0;
-    });
-    const pathResults = await Promise.all(paths);
-    const flattenedPaths = pathResults.flat(Infinity);
-    const size = flattenedPaths.reduce((i, size) => i + size, 0);
-    // Newest to oldest file, so we can pop the list (faster)
-    ctimes.sort((a, b) => {
-        return a[1] - b[1]
-    })
-    //console.table(ctimes);
-    return [size, ctimes];
-}
-
 let INITIALISED = null;
 
 async function handleMessage(e) {
@@ -432,7 +406,7 @@ async function handleMessage(e) {
         }
         case "analyse": {
             if (!predictWorkers.length) {
-                UI.postMessage({event: 'generate-alert', type: 'warning',  
+                generateAlert({type: 'warning',  
                     message: `A previous analysis resulted in an out-of-memory error, it is recommended you reduce the batch size from ${BATCH_SIZE}`
                 })
                 UI.postMessage({event: 'analysis-complete', quiet: true});
@@ -585,6 +559,10 @@ async function handleMessage(e) {
             await onUpdateLocale(args.locale, args.labels, args.refreshResults)
             break;
         }
+        case 'update-summary': {
+            await getSummary();
+            break;
+        }
         case "update-state": {
             appPath = args.path || appPath; tempPath = args.temp || tempPath;
             // If we change the speciesThreshold, we need to invalidate any location caches
@@ -629,7 +607,7 @@ function savedFileCheck(fileList) {
             }
         });
     } else {
-        UI.postMessage({event: 'generate-alert', type: 'error',  message: 'The database has not finished loading. The saved file check was skipped'})
+        generateAlert({type: 'error',  message: 'The database has not finished loading. The saved file check was skipped'})
         return undefined
     }
 }
@@ -658,7 +636,6 @@ async function onLaunch({model = 'chirpity', batchSize = 32, threads = 1, backen
     SEEN_MODEL_READY = false;
     LIST_CACHE = {}
     sampleRate = model === "birdnet" ? 48_000 : 24_000;
-    setAudioContext(sampleRate);
     UI.postMessage({event:'ready-for-tour'});
     STATE.detect.backend = backend;
     BATCH_SIZE = batchSize;
@@ -978,6 +955,8 @@ async function onAnalyse({
     AUDACITY = {};
     batchChunksToSend = {};
     FILE_QUEUE = filesInScope;
+    AUDIO_BACKLOG = 0;
+    STATE.processingPaused = false;
     
     
     if (!STATE.selection) {
@@ -1058,7 +1037,7 @@ function onAbort({
     DEBUG && console.log("abort received")
     //restart the workers
     terminateWorkers();
-    spawnPredictWorkers(model, list, BATCH_SIZE, NUM_WORKERS)
+    setTimeout(() => spawnPredictWorkers(model, list, BATCH_SIZE, NUM_WORKERS), 20);
 
 }
 
@@ -1068,7 +1047,7 @@ const getDuration = async (src) => {
         audio = new Audio();
         audio.src = src.replaceAll('#', '%23').replaceAll('?', '%3F'); // allow hash and ? in the path (https://github.com/Mattk70/Chirpity-Electron/issues/98)
         audio.addEventListener("loadedmetadata", function () {
-            const duration = audio.duration;
+            const duration = audio.duration === Infinity ? Number.MAX_SAFE_INTEGER : audio.duration;
             audio = undefined;
             // Tidy up - cloning removes event listeners
             const old_element = document.getElementById("audio");
@@ -1078,7 +1057,7 @@ const getDuration = async (src) => {
             resolve(duration);
         });
         audio.addEventListener('error', (error) => {
-            UI.postMessage({event: 'generate-alert', type: 'error',  message: 'Unable to extract essential metadata from ' + src})
+            generateAlert({type: 'error',  message: 'Unable to extract essential metadata from ' + src})
             reject(error, src)
         })
     });
@@ -1174,31 +1153,30 @@ async function loadAudioFile({
 }) {
 
     if (file) {
-        await fetchAudioBuffer({ file, start, end })
-        .then((buffer) => {
-            let audioArray = buffer.getChannelData(0);
-            UI.postMessage({
-                event: 'worker-loaded-audio',
-                location: METADATA[file].locationID,
-                start: METADATA[file].fileStart,
-                sourceDuration: METADATA[file].duration,
-                bufferBegin: start,
-                file: file,
-                position: position,
-                contents: audioArray,
-                fileRegion: region,
-                preserveResults: preserveResults,
-                play: play,
-                queued: queued,
-                goToRegion,
-                metadata: METADATA[file].metadata
-            }, [audioArray.buffer]);
-        })
+        const audio = await fetchAudioBuffer({ file, start, end })
         .catch( (error) => {
             console.log(error);
             // notify and return null if no matching file was found
-            notifyMissingFile(file)
+            generateAlert({type: 'error',  message: error.message});
+            error.code === 'ENOENT' && notifyMissingFile(file)
         })
+        let audioArray = getMonoChannelData(audio);
+        UI.postMessage({
+            event: 'worker-loaded-audio',
+            location: METADATA[file].locationID,
+            start: METADATA[file].fileStart,
+            sourceDuration: METADATA[file].duration,
+            bufferBegin: start,
+            file: file,
+            position: position,
+            contents: audioArray,
+            fileRegion: region,
+            preserveResults: preserveResults,
+            play: play,
+            queued: queued,
+            goToRegion,
+            metadata: METADATA[file].metadata
+        }, [audioArray.buffer]);
         let week;
         if (STATE.list === 'location'){
             week = STATE.useWeek ? new Date(METADATA[file].fileStart).getWeekNumber() : -1
@@ -1245,7 +1223,7 @@ const setMetadata = async ({ file, source_file = file }) => {
         }
         if (file.toLowerCase().endsWith('wav')){
             const t0 = Date.now();
-            const wavMetadata = await extractWaveMetadata(file).catch(error => console.warn("Error extracting GUANO", error));
+            const wavMetadata = await extractWaveMetadata(file)//.catch(error => console.warn("Error extracting GUANO", error));
             if (Object.keys(wavMetadata).includes('guano')){
                 const guano = wavMetadata.guano;
                 const location = guano['Loc Position'];
@@ -1298,216 +1276,79 @@ const setMetadata = async ({ file, source_file = file }) => {
     return METADATA[file];
 }
 
-function setupCtx(audio, rate, destination, file) {
-    rate ??= sampleRate;
-    // Deal with detached arraybuffer issue
-    const useFilters = (STATE.filters.sendToModel && STATE.filters.active) || destination === 'UI';
-    return audioCtx.decodeAudioData(audio.buffer)
-    .then( audioBuffer => {
-        const audioCtxSource = audioCtx.createBufferSource();
-        audioCtxSource.buffer = audioBuffer;
-        audioBuffer = null; //  release memory
-        const duration = audioCtxSource.buffer.duration;
-        const buffer = audioCtxSource.buffer;
-
-        const offlineCtx = new OfflineAudioContext(1, rate * duration, rate);
-        const offlineSource = offlineCtx.createBufferSource();
-        offlineSource.buffer = buffer;
-        let previousFilter = undefined;
-        if (useFilters){
-            if (STATE.filters.active) {
-                if (STATE.filters.highPassFrequency) {
-                    // Create a highpass filter to cut low-frequency noise
-                    const highpassFilter = offlineCtx.createBiquadFilter();
-                    highpassFilter.type = "highpass"; // Standard second-order resonant highpass filter with 12dB/octave rolloff. Frequencies below the cutoff are attenuated; frequencies above it pass through.
-                    highpassFilter.frequency.value = STATE.filters.highPassFrequency; //frequency || 0; // This sets the cutoff frequency. 0 is off. 
-                    highpassFilter.Q.value = 0; // Indicates how peaked the frequency is around the cutoff. The greater the value, the greater the peak.
-                    offlineSource.connect(highpassFilter);
-                    previousFilter = highpassFilter;
-                }
-                if (STATE.filters.lowShelfFrequency && STATE.filters.lowShelfAttenuation) {
-                    // Create a lowshelf filter to attenuate low-frequency noise
-                    const lowshelfFilter = offlineCtx.createBiquadFilter();
-                    lowshelfFilter.type = 'lowshelf';
-                    lowshelfFilter.frequency.value = STATE.filters.lowShelfFrequency; // This sets the cutoff frequency of the lowshelf filter to 1000 Hz
-                    lowshelfFilter.gain.value = STATE.filters.lowShelfAttenuation; // This sets the boost or attenuation in decibels (dB)
-                    previousFilter ? previousFilter.connect(lowshelfFilter) : offlineSource.connect(lowshelfFilter);
-                    previousFilter = lowshelfFilter;
-                }
-            }      
-        }
-        if (STATE.audio.gain){
-            var gainNode = offlineCtx.createGain();
-            gainNode.gain.value = Math.pow(10, STATE.audio.gain / 20);
-            previousFilter ? previousFilter.connect(gainNode) : offlineSource.connect(gainNode);
-            gainNode.connect(offlineCtx.destination);
-        } else {
-            previousFilter ? previousFilter.connect(offlineCtx.destination) : offlineSource.connect(offlineCtx.destination);
-        }
-        offlineSource.start();
-        return offlineCtx;
-    })
-    .catch(error => aborted || console.warn(error, file));    
-};
-
-function checkBacklog() {
+function checkBacklog(ffmpegCommand = null) {
     return new Promise((resolve) => {
-        const backlog = sumObjectValues(predictionsRequested) - sumObjectValues(predictionsReceived);
-        DEBUG && console.log('backlog:', backlog);
-        
-        if (backlog >= predictWorkers.length * 2) {
-            // If backlog is too high, check again after a short delay
-            setTimeout(() => {
-                resolve(checkBacklog()); // Recursively call until backlog is within limits
-            }, 50);
-        } else {
-            resolve(); // Backlog ok, read the stream data
+        let firstRun = true, hysteresis_factor = 2;
+
+        if (!aborted && AUDIO_BACKLOG < NUM_WORKERS * hysteresis_factor && !STATE.processingPaused) {
+            resolve(true);
+            return;
         }
+
+        const interval = setInterval(() => {
+            const backlog = AUDIO_BACKLOG;
+            if (aborted) {
+                clearInterval(interval);
+                resolve(false);
+                return;
+            }
+
+            if (firstRun) {
+                DEBUG && console.log('backlog (initial):', backlog);
+                firstRun = false; // Ensure this logs only on the first call
+            }
+
+            if (backlog >= NUM_WORKERS * hysteresis_factor) {
+                if (ffmpegCommand) {
+                    STATE.processingPaused || pauseFfmpeg(ffmpegCommand); //.kill('SIGSTOP');;
+                }
+                firstRun && console.log('stop signal sent, backlog: ', backlog);
+                STATE.processingPaused = true;
+
+            } else if (backlog <= NUM_WORKERS) {
+                DEBUG && console.log('backlog (final):', backlog);
+                if (STATE.processingPaused) {
+                    if (ffmpegCommand) {
+                        resumeFfmpeg(ffmpegCommand); //.kill('SIGCONT');
+                    }
+                    console.log('resume signal sent, backlog: ', backlog);
+                    STATE.processingPaused = false;
+                }
+
+                clearInterval(interval); // Backlog is within limits, stop checking
+                resolve(true); // Resolve the promise
+            }
+        }, 20);
     });
 }
 
-/**
-*
-* @param file
-* @param start
-* @param end
-* @returns {Promise<void>}
-*/
+function pauseFfmpeg(ffmpegCommand){
+    if (isWin32){
+        const pid = ffmpegCommand.ffmpegProc?.pid;
+        const message = pid ? (ntsuspend.suspend(pid) ? 'Ffmpeg process resumed' : 'Could not resume process') 
+            : 'Could not resume process (exited)';
+        console.log(message)
+    } else {
+        ffmpegCommand.kill('SIGSTOP')
+    }
+}
+
+function resumeFfmpeg(ffmpegCommand){
+    if (isWin32){
+        // Sometimes, the process exits before resume can be called
+        const pid = ffmpegCommand.ffmpegProc?.pid;
+        const message = pid ? (ntsuspend.resume(pid) ? 'Ffmpeg process resumed' : 'Could not resume process') 
+            : 'Could not resume process (exited)';
+        console.log(message)
+    } else {
+        ffmpegCommand.kill('SIGCONT')
+    }
+}
+
+
 
 let predictQueue = [];
 
-const getWavePredictBuffers = async ({
-    file = '', start = 0, end = undefined
-}) => {
-    if (! fs.existsSync(file)) {
-        const found = await getWorkingFile(file);
-        if (!found) return
-        return await getPredictBuffers({file, start, end})
-    }
-    // Ensure max and min are within range
-    start = Math.max(0, start);
-    end = Math.min(METADATA[file].duration, end);
-    if (start > METADATA[file].duration) {
-        return
-    }
-    let meta = {};
-    batchChunksToSend[file] = Math.ceil((end - start) / (BATCH_SIZE * WINDOW_SIZE));
-    predictionsReceived[file] = 0;
-    predictionsRequested[file] = 0;
-    let readStream;
-    // extract the header. With bext and iXML metadata, this can be up to 128k, hence 131072
-    const headerStream = fs.createReadStream(file, {start: 0, end: 524288, highWaterMark: 524288});
-    headerStream.on('readable',  () => {
-        let chunk = headerStream.read();
-        let wav = new wavefileReader.WaveFileReader();
-        try {
-            wav.fromBuffer(chunk);
-        } catch (e) {
-            UI.postMessage({event: 'generate-alert', type: 'error',  message: `Cannot parse ${file}, it has an invalid wav header.`});
-            console.warn('GetWavePredictBuffers failed: ', e)
-            headerStream.close();
-            updateFilesBeingProcessed(file);
-            return;
-        }
-        let headerEnd;
-        wav.signature.subChunks.forEach(el => {
-            if (el['chunkId'] === 'data') {
-                headerEnd = el.chunkData.start;
-            }
-        });
-        meta.header = chunk.subarray(0, headerEnd);
-        const byteRate = wav.fmt.byteRate;
-        const sample_rate = wav.fmt.sampleRate;
-        meta.byteStart = Math.round((start * byteRate) / sample_rate) * sample_rate + headerEnd;
-        meta.byteEnd = Math.round((end * byteRate) / sample_rate) * sample_rate + headerEnd;
-        meta.highWaterMark = byteRate * BATCH_SIZE * WINDOW_SIZE;
-        headerStream.destroy();
-        DEBUG && console.log('Header extracted for ', file);
-
-
-        readStream = fs.createReadStream(file, {
-            start: meta.byteStart, end: meta.byteEnd, highWaterMark: meta.highWaterMark
-        });
-
-    
-        let chunkStart = start * sampleRate;
-        // Changed on.('data') handler because of:  https://stackoverflow.com/questions/32978094/nodejs-streams-and-premature-end
-        readStream.on('readable', async () => {
-            if (aborted) {
-                readStream.destroy();
-                return
-            }
-            await checkBacklog();
-            const chunk = readStream.read();
-            if (chunk === null || chunk.byteLength <= 1 ) {
-                // EOF
-                chunk?.byteLength && predictionsReceived[file]++;
-                readStream.destroy();
-            } else {
-                const audio = joinBuffers(meta.header, chunk);
-                predictQueue.push([audio, file, end, chunkStart]);
-                chunkStart += WINDOW_SIZE * BATCH_SIZE * sampleRate;
-                processPredictQueue();
-            }
-        })
-        readStream.on('error', err => {
-            console.log(`readstream error: ${err}, start: ${start}, , end: ${end}, duration: ${METADATA[file].duration}`);
-            err.code === 'ENOENT' && notifyMissingFile(file);
-        })
-    })    
-}
-
-function processPredictQueue(audio, file, end, chunkStart){
-
-    if (! audio) [audio, file, end, chunkStart]  = predictQueue.shift(); // Dequeue chunk
-    if (audio.length === 0) {
-        console.error('Shifted zero length audio from predict queue');
-        return
-    } 
-    predictionsRequested[file]++; // do this before any async stuff
-    setupCtx(audio, undefined, 'model', file).then(offlineCtx => {
-        let worker;
-        if (offlineCtx) {
-            offlineCtx.startRendering().then((resampled) => {
-                const myArray = resampled.getChannelData(0);
-                workerInstance = ++workerInstance >= NUM_WORKERS ? 0 : workerInstance;
-                worker = workerInstance;
-                feedChunksToModel(myArray, chunkStart, file, end, worker);
-                return
-            }).catch((error) => {
-                predictionsRequested[file]--; // Didn't request a prediction after all
-                aborted || console.error(`PredictBuffer rendering failed: ${error}, file ${file}`);
-                updateFilesBeingProcessed(file);
-                return
-            });
-        } else {
-            if (audio.length === 0){
-                if (!aborted){
-                    // If the audio length is 0 now, we must have run out of memory
-                    terminateWorkers();
-                    // Hard quit
-                    UI.postMessage({event: 'analysis-complete', quiet: true})
-                    console.error(`Out of memory. Batch size was (${BATCH_SIZE}) threads: ${predictWorkers.length}`);
-                        aborted = true;
-                        const message = `
-                            <p class="text-danger h6">System memory exhausted, the operation has been terminated. </p>
-                            <p>
-                            <b>Tip:</b> Close any unnecessary open applications. If that is not effective, reduce the number of Threads ${BATCH_SIZE > 4 ? 'or lower the batch size' : ''} in the system settings'}.<p>`;
-                    UI.postMessage({event: 'generate-alert', type: 'error',  message: message, autohide: false})
-                return
-            }
-        }
-        console.log('Short chunk', audio.length, 'padding');
-        let chunkLength = STATE.model === 'birdnet' ? 144_000 : 72_000;
-        workerInstance = ++workerInstance >= NUM_WORKERS ? 0 : workerInstance;
-        worker = workerInstance;
-        const myArray = new Float32Array(Array.from({ length: chunkLength }).fill(0));
-        feedChunksToModel(myArray, chunkStart, file, end);
-    }}).catch(error => { 
-        aborted || console.warn(file, error) ;
-        predictionsRequested[file]--; // Didn't request a prediction after all
-    })
-}
 
 const getPredictBuffers = async ({
     file = '', start = 0, end = undefined
@@ -1532,99 +1373,55 @@ const getPredictBuffers = async ({
     const highWaterMark =  samplesInBatch * 2;
     
     let chunkStart = start * sampleRate;
-    if (STATE.detect.backend === 'tensorflow'){
-        const step = (BATCH_SIZE * WINDOW_SIZE);
-        // Throttle the ingest of transcoded audio
-        for (let i = start; i < end; i += step){
-            await checkBacklog();
-            const finish = i + step;
-            await processAudio(file, i, finish, chunkStart, highWaterMark)
-            chunkStart += samplesInBatch;
-        }
-    } else {
-        // Full gas
-        await processAudio(file, start, end, chunkStart, highWaterMark, samplesInBatch)
-    }
+
+
+    await processAudio(file, start, end, chunkStart, highWaterMark, samplesInBatch)
+
 }
 
-function lookForHeader(buffer){
-    //if (buffer.length < 4096) return undefined
-    try {
-        const wav = new wavefileReader.WaveFileReader();
-        wav.fromBuffer(buffer);
-        let headerEnd;
-        wav.signature.subChunks.forEach(el => {
-            if (el['chunkId'] === 'data') {
-                headerEnd = el.chunkData.start;
-            }
-        });
-        return buffer.subarray(0, headerEnd);
-    } catch (e) {
-        DEBUG && console.log(e)
-        return undefined
-    }
-}
-
-function processAudio (file, start, end, chunkStart, highWaterMark, samplesInBatch){
-    let header, shortFile = true;
+async function processAudio (file, start, end, chunkStart, highWaterMark, samplesInBatch){
     return new Promise((resolve, reject) => {
         let concatenatedBuffer = Buffer.alloc(0);
         const command = setupFfmpegCommand({file, start, end, sampleRate})
         command.on('error', (error) => {
-            updateFilesBeingProcessed(file)
-            if (error.message.includes('SIGKILL')) console.log('FFMPEG process shut down at user request')
-            else {
-                error.message = error.message + '|' + error.stack;
+            if (error.message === 'Output stream closed'){
+                console.warn(`processAudio: ${file} ${error}`);
+            } else {
+                if (error.message.includes('SIGKILL')) console.log('FFMPEG process shut down at user request')
+                reject(error)
             }
-            console.log('Ffmpeg error in file:\n', file, 'stderr:\n', error)
-            reject(console.warn('getPredictBuffers: Error in ffmpeg extracting audio segment:', error));
         });
-
+        command.on('progress', (progress) => {
+            DEBUG && console.log('progress: ', progress.timemark)
+            checkBacklog(command)
+        })
         const STREAM = command.pipe();
-        STREAM.on('readable', () => {           
+        STREAM.on('data', (chunk) => {
             if (aborted) {
-                STREAM.end();
+                STREAM.destroy();
                 return
             }
-            const chunk = STREAM.read();
-            if (chunk === null) {
-                //EOF: deal with part-full buffers
-                // if (shortFile) highWaterMark -= header.length;
-                if (concatenatedBuffer.byteLength){
-                    header || console.warn('no header for ' + file)
-                    let noHeader;
-                    if (concatenatedBuffer.length < header.length) {noHeader = true}
-                    else {noHeader = concatenatedBuffer.compare(header, 0, header.length, 0, header.length)} //compare returns 0 when there is a header in audio_chunk!
-                    const audio = noHeader ? Buffer.concat([header, concatenatedBuffer]) : concatenatedBuffer;
-                    processPredictQueue(audio, file, end, chunkStart);
-                } else {
-                    updateFilesBeingProcessed(file)
-                }
-                DEBUG && console.log('All chunks sent for ', file);
-                resolve()
+            concatenatedBuffer = concatenatedBuffer.length ? joinBuffers(concatenatedBuffer, chunk) : chunk;
+            // if we have a full buffer
+            if (concatenatedBuffer.length > highWaterMark) {
+                const audio_chunk = concatenatedBuffer.subarray(0, highWaterMark);
+                const remainder = concatenatedBuffer.subarray(highWaterMark);
+                prepareWavForModel(audio_chunk, file, end, chunkStart);
+                feedChunksToModel(...predictQueue.shift());
+                chunkStart += samplesInBatch;
+                concatenatedBuffer = remainder;
             }
-            else {
-                concatenatedBuffer = concatenatedBuffer.length ? joinBuffers(concatenatedBuffer, chunk) : chunk;
-                if (!header) {
-                    header = lookForHeader(concatenatedBuffer);
-                    // First chunk sent to model is short because it contains the header
-                    // Highwatermark is the length of audio alone
-                    // Initally, the highwatermark needs to add the header length to get the correct length of audio
-                    if (header) highWaterMark += header.length;
-                }
-
-                // if we have a full buffer
-                if (concatenatedBuffer.length > highWaterMark) {     
-                    const audio_chunk = concatenatedBuffer.subarray(0, highWaterMark);
-                    const remainder = concatenatedBuffer.subarray(highWaterMark);
-                    let noHeader = concatenatedBuffer.compare(header, 0, header.length, 0, header.length)
-                    const audio = noHeader ? Buffer.concat([header, audio_chunk]) : audio_chunk;
-                    processPredictQueue(audio, file, end, chunkStart);
-                    chunkStart += samplesInBatch;
-                    concatenatedBuffer = remainder;
-                }
-            }
+            
         });
+        STREAM.on('end', () => {
+            //EOF: deal with part-full buffers
+            if (concatenatedBuffer.byteLength){
+                prepareWavForModel(concatenatedBuffer, file, end, chunkStart);
+                feedChunksToModel(...predictQueue.shift());
+            }
+            DEBUG && console.log('All chunks sent for ', file);
+            return resolve()
+        })
 
         STREAM.on('error', err => {
             console.log('stream error: ', err);
@@ -1632,6 +1429,27 @@ function processAudio (file, start, end, chunkStart, highWaterMark, samplesInBat
         })
 
     }).catch(error => console.log(error));
+}
+
+function getMonoChannelData(audio){
+        // Calculate the number of samples and directly create a Float32Array
+        const sampleCount = (audio.length) / 2; // 2 bytes per sample for 16-bit PCM
+        const channelData = new Float32Array(sampleCount);
+        
+        // Populate the Float32Array with normalised values
+        for (let i = 0, j = 0; j < audio.length; i++, j += 2) {
+            const sample = audio.readInt16LE(j);
+            channelData[i] = sample / 32768; // Normalise to [-1, 1] range
+        }
+        return channelData
+}
+
+function prepareWavForModel(audio, file, end, chunkStart) {
+    predictionsRequested[file]++;
+    const channelData = getMonoChannelData(audio);
+    // Send the channel data to the model
+    predictQueue.push([channelData, chunkStart, file, end]);
+    AUDIO_BACKLOG++;
 }
 
 /**
@@ -1656,21 +1474,22 @@ const fetchAudioBuffer = async ({
     // Use ffmpeg to extract the specified audio segment
     if (isNaN(start)) throw(new Error('fetchAudioBuffer: start is NaN'));
     return new Promise((resolve, reject) => {
+        const filters = STATE.filters;
         const command = setupFfmpegCommand({
             file,
             start,
             end,
             sampleRate: 24000,
-            format: 'wav',
+            format: 's16le',
             channels: 1,
             additionalFilters: [
-                STATE.filters.lowShelfAttenuation && {
+                filters.lowShelfAttenuation && filters.lowShelfFrequency && {
                     filter: 'lowshelf',
-                    options: `gain=${STATE.filters.lowShelfAttenuation}:f=${STATE.filters.lowShelfFrequency}`
+                    options: `gain=${filters.lowShelfAttenuation}:f=${filters.lowShelfFrequency}`
                 },
-                STATE.filters.highPassFrequency && {
+                filters.highPassFrequency && {
                     filter: 'highpass',
-                    options: `f=${STATE.filters.highPassFrequency}:poles=1`
+                    options: `f=${filters.highPassFrequency}:poles=1`
                 },
                 STATE.audio.normalise && {
                     filter: 'loudnorm',
@@ -1681,7 +1500,7 @@ const fetchAudioBuffer = async ({
         const stream = command.pipe();
         
         command.on('error', error => {
-            UI.postMessage({event: 'generate-alert', type: 'error',  message: error})
+            generateAlert({type: 'error',  message: error})
             reject(new Error('fetchAudioBuffer: Error extracting audio segment:', error));
         });
 
@@ -1690,15 +1509,7 @@ const fetchAudioBuffer = async ({
             if (chunk === null){
                 // Last chunk
                 const audio = concatenatedBuffer;
-                setupCtx(audio, sampleRate, 'UI', file).then(offlineCtx => {
-                    offlineCtx.startRendering().then(resampled => {
-                        resolve(resampled);
-                    }).catch((error) => {
-                        console.error(`FetchAudio rendering failed: ${error}`);
-                    });
-                }).catch( (error) => {
-                    reject(error.message)
-                });  
+                resolve(audio)
                 stream.destroy();
             } else {
                 concatenatedBuffer = concatenatedBuffer.length ?  joinBuffers(concatenatedBuffer, chunk) : chunk;
@@ -1718,7 +1529,8 @@ async function feedChunksToModel(channelData, chunkStart, file, end, worker) {
 
     if (worker === undefined) {
         // pick a worker - this method is faster than looking for available workers
-        worker = ++workerInstance >= NUM_WORKERS ? 0 : workerInstance
+        if (++workerInstance >= NUM_WORKERS) workerInstance = 0;
+        worker = workerInstance
     }
     const objData = {
         message: 'predict',
@@ -1733,19 +1545,19 @@ async function feedChunksToModel(channelData, chunkStart, file, end, worker) {
         confidence: STATE.detect.confidence,
         chunks: channelData
     };
-    if (predictWorkers[worker]) predictWorkers[worker].isAvailable = false;
-    predictWorkers[worker]?.postMessage(objData, [channelData.buffer]);
+    predictWorkers[worker].isAvailable = false;
+    predictWorkers[worker].postMessage(objData, [channelData.buffer]);
 }
 async function doPrediction({
     file = '',
     start = 0,
     end = METADATA[file].duration,
 }) {
-    if (file.toLowerCase().endsWith('.wav')){
-        await getWavePredictBuffers({ file: file, start: start, end: end }).catch( (error) => console.warn(error));
-    } else {
+    // if (file.toLowerCase().endsWith('.wav')){
+    //     await getWavePredictBuffers({ file: file, start: start, end: end }).catch( (error) => console.warn(error));
+    // } else {
         await getPredictBuffers({ file: file, start: start, end: end }).catch( (error) => console.warn(error));
-    }
+    // }
     
     UI.postMessage({ event: 'update-audio-duration', value: METADATA[file].duration });
 }
@@ -2026,7 +1838,7 @@ const bufferToAudio = async ({
             DEBUG && console.log('FFmpeg command: ' + commandLine);
         })
         command.on('error', (err) => {
-            console.log('An error occurred: ' + err.message);
+            reject(console.error('An error occurred: ' + err.message));
         })
         command.on('end', function () {
             DEBUG && console.log(format + " file rendered")
@@ -2040,7 +1852,7 @@ async function saveAudio(file, start, end, filename, metadata, folder) {
     const convertedFilePath = await bufferToAudio({
         file: file, start: start, end: end, meta: metadata, folder: folder, filename: filename
     });
-    if (folder && DEBUG) { console.log('Audio file saved: ', convertedFilePath) }
+    if (folder) { DEBUG && console.log('Audio file saved: ', convertedFilePath) }
     else {
         UI.postMessage({event:'audio-file-to-save', file: convertedFilePath, filename: filename, extension: STATE.audio.format})
     }
@@ -2132,7 +1944,6 @@ async function batchInsertRecords(cname, label, files, originalCname) {
         query += ` AND dateTime BETWEEN ${STATE.explore.range.start} AND ${STATE.explore.range.end}`;
     }
     const records = await STATE.db.allAsync(query, ...params);
-    const updatedID = db.getAsync('SELECT id FROM species WHERE cname = ?', cname);
     let count = 0;
     await db.runAsync('BEGIN');
     for (let i = 0; i< records.length; i++) {
@@ -2170,7 +1981,7 @@ const onInsertManualRecord = async ({ cname, start, end, comment, count, file, l
     if (!res) { 
         // Manual records can be added off the bat, so there may be no record of the file in either db
         fileStart = METADATA[file].fileStart;
-        res = await db.runAsync('INSERT OR IGNORE INTO files VALUES ( ?,?,?,?,?,? )',
+        res = await db.runAsync('INSERT OR IGNORE INTO files VALUES ( ?,?,?,?,?,?,? )',
         fileID, file, METADATA[file].duration, fileStart, undefined, undefined, METADATA[file].metadata);
         fileID = res.lastID;
         changes = 1;
@@ -2210,63 +2021,72 @@ const insertDurations = async (file, id) => {
 }
 
 const generateInsertQuery = async (latestResult, file) => {
-    const db = STATE.db;              
-    await db.runAsync('BEGIN');
-    let insertQuery = 'INSERT OR IGNORE INTO records VALUES ';
-    let fileID;
-    let res = await db.getAsync('SELECT id FROM files WHERE name = ?', file);
-    if (!res) {
-        let id = null;
-        if (METADATA[file].metadata){
-            const metadata = JSON.parse(METADATA[file].metadata);
-            const guano = metadata.guano;
-            if (guano && guano['Loc Position']){
-                const [lat, lon] = guano['Loc Position'].split(' ');
-                const place = guano['Site Name'] || guano['Loc Position'];
-                const row = await db.getAsync('SELECT id FROM locations WHERE lat = ? AND lon = ?', parseFloat(lat), parseFloat(lon))
-                if (!row) {
-                    const result = await db.runAsync('INSERT OR IGNORE INTO locations VALUES ( ?, ?,?,? )',
-                     undefined, parseFloat(lat), parseFloat(lon), place);
-                    id = result.lastID;
+    const db = STATE.db;
+    try {
+        await db.runAsync('BEGIN');
+        let insertQuery = 'INSERT OR IGNORE INTO records VALUES ';
+        let fileID;
+        let res = await db.getAsync('SELECT id FROM files WHERE name = ?', file);
+        if (!res) {
+            let id = null;
+            if (METADATA[file].metadata){
+                const metadata = JSON.parse(METADATA[file].metadata);
+                const guano = metadata.guano;
+                if (guano && guano['Loc Position']){
+                    const [lat, lon] = guano['Loc Position'].split(' ');
+                    const place = guano['Site Name'] || guano['Loc Position'];
+                    const row = await db.getAsync('SELECT id FROM locations WHERE lat = ? AND lon = ?', parseFloat(lat), parseFloat(lon))
+                    if (!row) {
+                        const result = await db.runAsync('INSERT OR IGNORE INTO locations VALUES ( ?, ?,?,? )',
+                        undefined, parseFloat(lat), parseFloat(lon), place);
+                        id = result.lastID;
+                    }
                 }
             }
+            res = await db.runAsync('INSERT OR IGNORE INTO files VALUES ( ?,?,?,?,?,?,? )',
+            undefined, file, METADATA[file].duration, METADATA[file].fileStart, id, null, METADATA[file].metadata);
+            fileID = res.lastID;
+            await insertDurations(file, fileID);
+        } else {
+            fileID = res.id;
         }
-        res = await db.runAsync('INSERT OR IGNORE INTO files VALUES ( ?,?,?,?,?,?,? )',
-        undefined, file, METADATA[file].duration, METADATA[file].fileStart, id, null, METADATA[file].metadata);
-        fileID = res.lastID;
-        await insertDurations(file, fileID);
-    } else {
-        fileID = res.id;
-    }
 
-    let [keysArray, speciesIDBatch, confidenceBatch] = latestResult;
-    for (let i = 0; i < keysArray.length; i++) {
-        const key = parseFloat(keysArray[i]);
-        const timestamp = METADATA[file].fileStart + key * 1000;
-        const isDaylight = isDuringDaylight(timestamp, STATE.lat, STATE.lon);
-        const confidenceArray = confidenceBatch[i];
-        const speciesIDArray = speciesIDBatch[i];
-        for (let j = 0; j < confidenceArray.length; j++) {
-            const confidence = Math.round(confidenceArray[j] * 1000);
-            if (confidence < STATE.detect.confidence) break;
-            const speciesID = speciesIDArray[j];
-            insertQuery += `(${timestamp}, ${key}, ${fileID}, ${speciesID}, ${confidence}, null, null, ${key + 3}, null, ${isDaylight}), `;
+        let [keysArray, speciesIDBatch, confidenceBatch] = latestResult;
+        const minConfidence = Math.min(STATE.detect.confidence, 150); // store results with 15% confidence and up unless confidence set lower
+        for (let i = 0; i < keysArray.length; i++) {
+            const key = parseFloat(keysArray[i]);
+            const timestamp = METADATA[file].fileStart + key * 1000;
+            const isDaylight = isDuringDaylight(timestamp, STATE.lat, STATE.lon);
+            const confidenceArray = confidenceBatch[i];
+            const speciesIDArray = speciesIDBatch[i];
+            for (let j = 0; j < confidenceArray.length; j++) {
+                const confidence = Math.round(confidenceArray[j] * 1000);
+                if (confidence < minConfidence) break;
+                const speciesID = speciesIDArray[j];
+                insertQuery += `(${timestamp}, ${key}, ${fileID}, ${speciesID}, ${confidence}, null, null, ${key + 3}, null, ${isDaylight}), `;
+            }
         }
+        // Remove the trailing comma and space
+        insertQuery = insertQuery.slice(0, -2);
+        //DEBUG && console.log(insertQuery);
+        // Make sure we have some values to INSERT
+        insertQuery.endsWith(')') && await db.runAsync(insertQuery)
+            .catch( (error) => console.log("Database error:", error))
+        await db.runAsync('END');
+        return fileID
+    } catch {
+        await db.runAsync('ROLLBACK');
     }
-    // Remove the trailing comma and space
-    insertQuery = insertQuery.slice(0, -2);
-    //DEBUG && console.log(insertQuery);
-    // Make sure we have some values to INSERT
-    insertQuery.endsWith(')') && await db.runAsync(insertQuery)
-        .catch( (error) => console.log("Database error:", error))
-    await db.runAsync('END');
-    return fileID
 }
 
 const parsePredictions = async (response) => {
     let file = response.file;
-
+    AUDIO_BACKLOG--;
     const latestResult = response.result;
+    if (!latestResult.length){
+        predictionsReceived[file]++;
+        return response.worker
+    }
     DEBUG && console.log('worker being used:', response.worker);
     if (! STATE.selection) await generateInsertQuery(latestResult, file).catch(error => console.warn('Error generating insert query', error));
     let [keysArray, speciesIDBatch, confidenceBatch] = latestResult;
@@ -2335,30 +2155,26 @@ const parsePredictions = async (response) => {
         DEBUG && console.log(`File ${file} processed after ${(new Date() - predictionStart) / 1000} seconds: ${filesBeingProcessed.length} files to go`);
     }
 
-    !STATE.selection && (STATE.increment() === 0 || index === 1 ) && await getSummary({ interim: true });
+    !STATE.selection && (STATE.increment() === 0) && await getSummary({ interim: true });
 
     return response.worker
 }
-                        
+           
 let SEEN_MODEL_READY = false;
 async function parseMessage(e) {
     const response = e.data;
-    // Update this worker's availability
-    predictWorkers[response.worker].isAvailable = true;
-    
     switch (response['message']) {
         case "model-ready": {
             predictWorkers[response.worker].isReady = true;
+            predictWorkers[response.worker].isAvailable = true;
             if ( !SEEN_MODEL_READY) {
                 SEEN_MODEL_READY = true;
                 sampleRate = response["sampleRate"];
                 const backend = response["backend"];
-                console.log(backend);
+                DEBUG && console.log(backend);
                 UI.postMessage({
                     event: "model-ready",
-                    message: "ready",
-                    backend: backend,
-                    sampleRate: sampleRate
+                    message: "Give It To Me Baby. Uh-Huh Uh-Huh"
                 });
         }
         break;
@@ -2408,7 +2224,10 @@ async function processNextFile({
 } = {}) { 
     if (FILE_QUEUE.length) {
         let file = FILE_QUEUE.shift()
-        const found = await getWorkingFile(file).catch(error => console.warn('Error in getWorkingFile', JSON.stringify(error)));
+        const found = await getWorkingFile(file).catch(error => {
+            console.warn('Error in getWorkingFile', error);
+            generateAlert({type: 'warning',  message: error.message})
+        });
         if (found) {
             if (end) {}
             let boundaries = [];
@@ -2444,6 +2263,7 @@ async function processNextFile({
             }
         } else {
             DEBUG && console.log('Recursion: file not found')
+            updateFilesBeingProcessed(file) // remove file from processing list
             await processNextFile(arguments[0]).catch(error => console.warn('Error in recursive processNextFile call', error));
         }
     }
@@ -2451,19 +2271,9 @@ async function processNextFile({
 
 function sumObjectValues(obj) {
     let total = 0;
-    for (const key in obj) {
-        total += obj[key];
-    }
+    for (const key in obj) {  total += obj[key] }
     return total;
-    //return Object.values(obj).reduce((total, value) => total + value, 0);
 }
-
-function onSameDay(timestamp1, timestamp2) {
-    const date1Str = new Date(timestamp1).toLocaleDateString();
-    const date2Str = new Date(timestamp2).toLocaleDateString();
-    return date1Str === date2Str;
-}
-
 
 // Function to calculate the active intervals for an audio file in nocmig mode
 
@@ -2667,9 +2477,9 @@ const getResults = async ({
         filename += format == 'Raven' ? `_selections.txt` : '_detections.csv';
         const filePath = p.join(directory, filename);
         writeToPath(filePath, formattedValues, {headers: true, delimiter: format === 'Raven' ? '\t' : ','})
-        .on('error', err => UI.postMessage({event: 'generate-alert', type: 'warning',  message: `Cannot save file ${filePath}\nbecause it is open in another application`}))
+        .on('error', err => generateAlert({type: 'warning',  message: `Cannot save file ${filePath}\nbecause it is open in another application`}))
         .on('finish', () => {
-            UI.postMessage({event: 'generate-alert', message: filePath + ' has been written successfully.'});
+            generateAlert({message: filePath + ' has been written successfully.'});
         });
     }
     else {
@@ -2893,7 +2703,7 @@ const getSavedFileInfo = async (file) => {
         } 
         return row
     } else {
-        UI.postMessage({event: 'generate-alert', type: 'error',  message: 'The database has not finished loading. The check for the presence of the file in the archive has been skipped'})
+        generateAlert({type: 'error',  message: 'The database has not finished loading. The check for the presence of the file in the archive has been skipped'})
         return undefined
     }
 };
@@ -3707,7 +3517,7 @@ async function setIncludedIDs(dbToUse, lat, lon, week) {
 
         if (STATE.included === undefined) STATE.included = {}
         STATE.included = merge(STATE.included, includedObject);
-        messages.forEach(message => UI.postMessage({event: 'generate-alert', type: 'warning',  message: message} ))
+        messages.forEach(message => generateAlert({type: 'warning',  message: message} ))
         return STATE.included;
     })();
 
@@ -3724,13 +3534,13 @@ const pLimit = require('p-limit');
 async function convertAndOrganiseFiles(threadLimit) {
     // SANITY checks: archive location exists and is writeable?
     if (!fs.existsSync(STATE.archive.location)) {
-        UI.postMessage({event: 'generate-alert', type: 'error',  message: `Cannot access archive location: ${STATE.archive.location}. <br> Operation aborted`});
+        generateAlert({type: 'error',  message: `Cannot access archive location: ${STATE.archive.location}. <br> Operation aborted`});
         return false;
     }
     try {
         fs.accessSync(STATE.archive.location, fs.constants.W_OK);
     } catch {
-        UI.postMessage({event: 'generate-alert', type: 'error',  message: `Cannot write to archive location: ${STATE.archive.location}. <br> Operation aborted`});
+        generateAlert({type: 'error',  message: `Cannot write to archive location: ${STATE.archive.location}. <br> Operation aborted`});
         return false;
     }
     threadLimit ??= 4; // Set a default
@@ -3768,6 +3578,7 @@ async function convertAndOrganiseFiles(threadLimit) {
 
         const {archiveName} = await db.getAsync('SELECT archiveName FROM files WHERE name = ?', inputFilePath);
         if (archiveName === dbArchiveName && fs.existsSync(fullFilePath)) {
+            // TODO: just check for the file, if archvive name is null, add archive name to the db (if it is complete)
             DEBUG && console.log(`File ${inputFilePath} already converted. Skipping conversion.`);
             continue;
         }
@@ -3851,11 +3662,11 @@ async function convertFile(inputFilePath, fullFilePath, row, db, dbArchiveName, 
         let scaleFactor = 1;
         if (STATE.archive.trim) {
             if (boundaries.length > 1) { 
-                UI.postMessage({event: 'generate-alert', type: 'warning',  message: `Multi-day operations are not yet supported: ${inputFilePath} will not be trimmed`});
+                generateAlert({type: 'warning',  message: `Multi-day operations are not yet supported: ${inputFilePath} will not be trimmed`});
             } else {
                 const {start, end} = boundaries[0];
                 if (start === end) {
-                    UI.postMessage({event: 'generate-alert', type: 'warning', message: `${inputFilePath} will not be added to the archive as it is entirely during daylight.`});
+                    generateAlert({type: 'warning', message: `${inputFilePath} will not be added to the archive as it is entirely during daylight.`});
                     return resolve();
                 }
                 command.seekInput(start).duration(end - start);
@@ -3875,13 +3686,13 @@ async function convertFile(inputFilePath, fullFilePath, row, db, dbArchiveName, 
                     if (err) {
                         console.error("Error updating the database:", err);
                     } else {
-                        UI.postMessage({event: 'generate-alert', message: `Finished conversion for ${inputFilePath}`});
+                        generateAlert({message: `Finished conversion for ${inputFilePath}`});
                     }
                     resolve();
                 });
             })
             .on('error', (err) => {
-                UI.postMessage({event: 'generate-alert', type: 'error',  message: `Error converting file ${inputFilePath}:`, err});
+                generateAlert({type: 'error',  message: `Error converting file ${inputFilePath}:`, err});
                 reject(err);
             })
             .on('progress', (progress) => {
