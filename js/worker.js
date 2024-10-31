@@ -3403,8 +3403,8 @@ async function onSetCustomLocation({ lat, lon, place, files, db = STATE.db }) {
     await sendKnownLocationsToUI({ db: db, file: files[0] });
 }
     
-async function getLocations({ db = STATE.db, file }) {
-    const locations = await db.allAsync('SELECT * FROM locations ORDER BY place');
+async function sendKnownLocationsToUI({ db = STATE.db, file }) {
+    let locations = await db.allAsync('SELECT * FROM locations ORDER BY place');
     locations ??= [];
     UI.postMessage({ event: 'location-list', locations: locations, currentLocation: METADATA[file]?.locationID })
 }
