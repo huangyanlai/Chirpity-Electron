@@ -479,7 +479,7 @@ app.whenReady().then(async () => {
     });
     //Update handling
     autoUpdater.autoDownload = false;
-    autoUpdater.checkForUpdatesAndNotify()
+    autoUpdater.checkForUpdatesAndNotify().catch(error => console.warn('Error checking for updates', error))
     // Allow multiple instances of Chirpity - experimental! This alone doesn't work:
     //app.releaseSingleInstanceLock()
 
@@ -548,7 +548,7 @@ ipcMain.handle('saveFile', async (event, arg) => {
             title: 'Save File',
             filters: [{ name: 'Audio files', extensions: [extension] }],
             defaultPath: filename
-        }).then(saveObj => {
+        }).then( saveObj => {
             // Check if the user cancelled the operation
             const {canceled, filePath} = saveObj;
             if (canceled) {
@@ -556,16 +556,16 @@ ipcMain.handle('saveFile', async (event, arg) => {
                 fs.rmSync(file);
                 return;
             }
-
-            // Copy the file from temp directory to the selected save location
-            fs.rename(file, filePath, (err) => {
-                if (err) {
-                    console.error('Error saving the file:', err);
-                } else {
-                    DEBUG && console.log('File saved successfully to', filePath);
-                }
-                return;
-            });
+            try {
+                // Copy file to the destination
+                fs.copyFileSync(file, filePath);
+                
+                // Remove the original file
+                fs.unlinkSync(file);
+                DEBUG && console.log(`File moved from ${file} to ${filePath}`);
+            } catch (error) {
+                console.error(`Error moving file: ${error}`);
+            }
         })
     }
 

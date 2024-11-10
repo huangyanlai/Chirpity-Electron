@@ -10,7 +10,7 @@ Author: Matthew Kirkland
 ![image](https://github.com/Mattk70/Chirpity-Electron/assets/61826357/96b0af44-3893-4288-8291-cf0f6db89a38)
 
 ## Key Features
-- Uses two Machine Learning models to identify audio files based on the user's needs: BirdNET and the Chirpity model
+- Uses two Machine Learning models to identify audio files based on the user's needs: BirdNET and the Nocmig model
 - Supports audio input files such as WAV, MP3, MP4/M4A, AAC, Opus, Ogg, and FLAC
 - Audio analysis can run in the background while exploring the application
 - Tailor species detection based on the season, time of day, or a custom list of species 
@@ -18,7 +18,7 @@ Author: Matthew Kirkland
 - ...and <a href="https://chirpity.mattkirkland.co.uk/">more</a>
 
 ## Application setup
-Visit https://chirpity.mattkirkland.co.uk for platform specific installation instructions - Chirpity binaries are available for both Windows and Mac platforms. Linux users will need to run the application from source, as described below.
+Visit https://chirpity.mattkirkland.co.uk for platform specific installation instructions - Chirpity binaries are available for Windows, Mac and Linux platforms. 
 
 ## Running the application from source
 
@@ -51,7 +51,7 @@ Initialize the source directory with:
 npm init
 ```
 
-Now, install project dependencoies with:
+Now, install project dependencies with:
 
 ```
 npm install --save-dev

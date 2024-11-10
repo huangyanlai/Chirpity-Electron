@@ -144,7 +144,9 @@ div#contentWrapper.loaded {
     position: absolute;
     font-size: calc(32px * var(--font-size-scale));;
 }
-
+.zoom-xc {
+    font-size: calc(32px * var(--font-size-scale));;
+}
 .species-selector {
     position: relative;
 }
@@ -336,7 +338,7 @@ footer {
 }
 
 #dropdownMenuButton {
-    max-width: 350px;
+    max-width: 40vw;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -347,9 +349,12 @@ footer {
   max-height: 30vh;
 }
 
+#fileContainer {
+    max-width: 40vw;
+}
+
 .filename,
 .dropdown-menu-dark>a {
-    max-width: 300px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -465,7 +470,11 @@ footer {
     border: none
 }
 
-
+.disabled-link {
+    pointer-events: none;
+    opacity: 0.5;
+    cursor: default;
+}
 /* Style the results panel*/
 
 
@@ -534,6 +543,7 @@ input[type="range"].vertical {
     margin: 3px;
     appearance: auto;
     writing-mode: vertical-lr;
+    -webkit-appearance: slider-vertical;
     direction: rtl;
     top: -160px;
     right: 15px;
@@ -546,6 +556,7 @@ input[type="range"].vertical {
     background-color: #111;
     border-color: #999;
     border-radius: 1rem;
+
 }
 
 /* Animate Ellipsis */
