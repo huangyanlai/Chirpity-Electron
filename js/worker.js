@@ -3356,8 +3356,9 @@ const onFileDelete = async (fileName) => {
 }
     
 async function onUpdateLocale(locale, labels, refreshResults){
-    let t0 = performance.now();
+    let t0 = Date.now();
     await memoryDB.runAsync('BEGIN');
+    await diskDB.runAsync('BEGIN');
     if (STATE.model === 'birdnet'){
         for (let i = 0; i < labels.length; i++){
             const [sname, cname] = labels[i].trim().split('_');
@@ -3402,6 +3403,7 @@ async function onUpdateLocale(locale, labels, refreshResults){
     }
     await diskDB.runAsync('END');
     await memoryDB.runAsync('END');
+    console.warn(`transactino took ${Date.now() - t0}ms`)
     STATE.update({locale: locale});
     if (refreshResults) await Promise.all([getResults(), getSummary()])
 }
