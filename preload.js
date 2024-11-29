@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('electron', {
     selectDirectory: (path) => ipcRenderer.invoke('selectDirectory', path),
     openDialog: (method, config) => ipcRenderer.invoke('openFiles', method, config),
     getPath: () => ipcRenderer.invoke('getPath'),
+    getLocale: () => ipcRenderer.invoke('getLocale'),
     getTemp: () => ipcRenderer.invoke('getTemp'),
     getVersion: () => ipcRenderer.invoke('getVersion'),
     getAudio: () => ipcRenderer.invoke('getAudio'),
@@ -69,7 +70,12 @@ contextBridge.exposeInMainWorld('module', {
     os: os
 });
 
-//
+// Expose only specific environment variables
+contextBridge.exposeInMainWorld('env', {
+    TEST_ENV: process.env.TEST_ENV
+  });
+
+
 
 // Listen for messages from the main process
 // Function to display update download progress

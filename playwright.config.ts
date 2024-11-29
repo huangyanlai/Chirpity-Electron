@@ -4,7 +4,8 @@ import { defineConfig, PlaywrightTestConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './test',
   maxFailures: 2,
-  timeout: 10 * 1000,
+  timeout: 60 * 1000,
+  //workers: 4,
   use: {
     // Maximum time each action such as `click()` can take. Defaults to 0 (no limit).
     actionTimeout: 0,
@@ -19,10 +20,11 @@ export default defineConfig({
     //channel: 'chrome',
 
     // Run browser in headless mode.
-    headless: false,
+    headless: true,
 
     // Change the default data-testid attribute.
     //testIdAttribute: 'pw-test-id',
   },
+  
 });
 

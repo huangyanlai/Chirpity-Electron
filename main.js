@@ -310,7 +310,7 @@ async function createWindow() {
     }
     
     mainWindow.on('close', (e) => {
-        if (unsavedRecords){
+        if (unsavedRecords && !process.env.CI){
             const choice = dialog.showMessageBoxSync(mainWindow, {
                 type: 'warning',
                 buttons: ['Yes', 'No'],
@@ -365,7 +365,9 @@ app.whenReady().then(async () => {
     } else {
         ipcMain.handle('getVersion', () => app.getVersion());
     }
+
     ipcMain.handle('getPath', () => app.getPath('userData'));
+    ipcMain.handle('getLocale', () => app.getLocale());
     ipcMain.handle('getTemp', () => app.getPath('temp'));
     ipcMain.handle('isMac', () => process.platform === 'darwin');
     ipcMain.handle('getAudio', () => path.join(__dirname.replace('app.asar', ''), 'Help', 'example.mp3'));
@@ -479,7 +481,7 @@ app.whenReady().then(async () => {
     });
     //Update handling
     autoUpdater.autoDownload = false;
-    autoUpdater.checkForUpdatesAndNotify()
+    autoUpdater.checkForUpdatesAndNotify().catch(error => console.warn('Error checking for updates', error))
     // Allow multiple instances of Chirpity - experimental! This alone doesn't work:
     //app.releaseSingleInstanceLock()
 
@@ -510,8 +512,6 @@ ipcMain.handle('request-worker-channel', async (_event) =>{
 ipcMain.handle('unsaved-records', (_event, data) => {
     unsavedRecords = data.newValue; // Update the variable with the new value
 });
-
-
 
 ipcMain.handle('saveFile', async (event, arg) => {
     // Show file dialog to select audio file

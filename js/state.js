@@ -32,12 +32,14 @@ export class State {
             this.list = 'everything',
             this.customList = undefined,
             this.local = true,
-            this.incrementor = 5,
+            this.incrementor = 2,
             this.UUID = 0,
             this.track = true,
             this.powerSaveBlocker = false,
             this.archive = {location: undefined, format: 'ogg', auto: false, trim: false},
-            this.useGUANO = true
+            this.useGUANO = true;
+            this.debug = false,
+            this.fileStartMtime = false
     }
 
 

@@ -1,8 +1,8 @@
 import {trackVisit, trackEvent} from './tracking.js';
 import {DOM} from './DOMcache.js';
 import {IUCNCache} from './IUCNcache.js';
-
-let LOCATIONS, locationID = undefined, loadingTimeout;
+import {i18nSpeciesList,i18nHeadings, localiseUI, i18nContext, i18nLocation, i18nForm, i18nHelp, i18nToasts, i18nTitles, i18nLIST_MAP, i18nLists, IUCNLabel} from './i18n.js';
+let LOCATIONS, locationID = undefined, loadingTimeout, LIST_MAP;
 
 let LABELS = [], DELETE_HISTORY = [];
 // Save console.warn and console.error functions
@@ -86,6 +86,9 @@ const p = window.module.p;
 const uuidv4 = window.module.uuidv4;
 const os = window.module.os;
 
+// Is this CI / playwright?
+const isTestEnv = window.env.TEST_ENV === 'true';
+
 function hexToRgb(hex) {
     // Remove the '#' character if present
     hex = hex.replace(/^#/, '');
@@ -105,6 +108,13 @@ function createColormap(){
         {index: 1, rgb: hexToRgb(config.customColormap.loud)}
     ] : config.colormap;
     return colormap({ colormap: map, nshades:256, format: 'float' });
+}
+function interpolate(template, variables) {
+    return template.replace(/\$\{(.*?)\}/g, (match, key) => {
+        const value = variables[key.trim()] 
+        if (value == null) return match
+        else return value;
+    });
 }
 
 
@@ -138,21 +148,26 @@ new Promise((resolve) => {
 async function getPaths() {
     const appPath = await window.electron.getPath();
     const tempPath = await window.electron.getTemp();
-    console.log('path is', appPath, 'temp is', tempPath);
-    return [appPath, tempPath];
+    const locale = await window.electron.getLocale();
+    console.log('path is', appPath, 'temp is', tempPath, 'raw locale is', locale);
+    return [appPath, tempPath, locale];
 }
 
 let VERSION;
 let DIAGNOSTICS = {};
 
-window.electron.getVersion()
-.then((appVersion) => {
-    VERSION = appVersion;
-    console.log('App version:', appVersion);
-    DIAGNOSTICS['Chirpity Version'] = VERSION;
-})
-.catch(error => {
-    console.log('Error getting app version:', error)
+let appVersionLoaded = new Promise((resolve, reject) => {
+    window.electron.getVersion()
+    .then((appVersion) => {
+        VERSION = appVersion;
+        console.log('App version:', appVersion);
+        DIAGNOSTICS['Chirpity Version'] = VERSION;
+        resolve();
+    })
+    .catch(error => {
+        console.log('Error getting app version:', error);
+        reject(error);
+    });
 });
 
 let modelReady = false, fileLoaded = false;
@@ -337,7 +352,7 @@ const initWavesurfer = ({
     audio = undefined,
     height = 0
 }) => {
-    
+    const loggedErrors = new Set();
     if (wavesurfer) {
         wavesurfer.pause();
     }
@@ -386,17 +401,28 @@ const initWavesurfer = ({
     
     // Queue up next audio window while playing
     wavesurfer.on('audioprocess', function () {
-        
-        const currentTime = wavesurfer.getCurrentTime();
-        const duration = wavesurfer.getDuration();
-        const playedPart = currentTime / duration;
-        
-        if (playedPart > 0.5) {
+        // Ensure the audio file is loaded before proceeding
+        //if (!wavesurfer.isReady) return;
+        try {
+            const currentTime = wavesurfer.getCurrentTime();
+            const duration = wavesurfer.getDuration();
+            const playedPart = currentTime / duration;
             
-            if (!wavesurfer.bufferRequested && currentFileDuration > bufferBegin + windowLength) {
-                const begin = bufferBegin + windowLength;
-                postBufferUpdate({ begin: begin, play: false, queued: true })
-                wavesurfer.bufferRequested = true;
+            if (playedPart > 0.5) {
+                
+                if (!wavesurfer.bufferRequested && currentFileDuration > bufferBegin + windowLength) {
+                    const begin = bufferBegin + windowLength;
+                    postBufferUpdate({ begin: begin, play: false, queued: true })
+                    wavesurfer.bufferRequested = true;
+                }
+            }
+        } catch (e) {
+            const errorKey = e.message || e.toString();
+            if (!loggedErrors.has(errorKey)) {
+                // lets find out if it's because wavesurfer isn't ready
+                console.warn('onAudioProcessError', `isReady: ${wavesurfer.isReady}` )
+                console.warn('onAudioProcessError', e);
+                loggedErrors.add(errorKey);
             }
         }
     });
@@ -520,11 +546,12 @@ const buildFileMenu = (e) => {
     //e.preventDefault();
     e.stopImmediatePropagation();
     const menu = DOM.contextMenu;
+    const i18n = getI18n(i18nContext);
     menu.innerHTML = `
     <a class="dropdown-item" id="setCustomLocation"><span
-    class="material-symbols-outlined align-bottom pointer">edit_location_alt</span> Amend File Recording Location</a>
+    class="material-symbols-outlined align-bottom pointer">edit_location_alt</span> ${i18n.location}</a>
     <a class="dropdown-item" id="setFileStart"><span
-    class="material-symbols-outlined align-bottom pointer">edit_calendar</span> Amend File Start Time
+    class="material-symbols-outlined align-bottom pointer">edit_calendar</span> ${i18n.time}
     `;
     positionMenu(menu, e);
 }
@@ -542,12 +569,13 @@ function getDatetimeLocalFromEpoch(date) {
 
 function showDatePicker() {
     // Create a form element
+    const i18n = getI18n(i18nForm);
     const form = document.createElement("form");
     form.classList.add("mt-3", "mb-3", "p-3", "rounded", "text-bg-light", 'position-relative');
     form.style.zIndex = "1000";
     // Create a label for the datetime-local input
     const label = document.createElement("label");
-    label.innerHTML = "Select New Date and Time:";
+    label.innerHTML = i18n.select;
     label.classList.add("form-label");
     form.appendChild(label);
     
@@ -562,13 +590,13 @@ function showDatePicker() {
     
     // Create a submit button
     const submitButton = document.createElement("button");
-    submitButton.innerHTML = "Submit";
+    submitButton.innerHTML = i18n.submit;
     submitButton.classList.add("btn", "btn-primary", "mt-2");
     form.appendChild(submitButton);
     
     // Create a cancel button
     var cancelButton = document.createElement("button");
-    cancelButton.innerHTML = "Cancel";
+    cancelButton.innerHTML = i18n.cancel;
     cancelButton.classList.add("btn", "btn-secondary", "mt-2", "ms-2");
     form.appendChild(cancelButton);
     
@@ -665,6 +693,7 @@ function showMetadata(){
 }
 
 function renderFilenamePanel() {
+    const i18n = getI18n(i18nTitles);
     if (!STATE.currentFile) return;
     const openFile = STATE.currentFile;
     const files = STATE.openFiles;
@@ -675,7 +704,7 @@ function renderFilenamePanel() {
     const {parentFolder, fileName}  = extractFileNameAndFolder(openFile)
     const label = `${parentFolder}/${fileName}`;
     let appendStr;
-    const title = ` title="Context-click to update file start time or location" `;
+    const title = ` title="${i18n.filename}" `;
     const isSaved = ['archive', 'explore'].includes(STATE.mode) ? 'text-info' : 'text-warning';
     if (files.length > 1) {
         appendStr = `<div id="fileContainer" class="btn-group dropup pointer">
@@ -708,14 +737,15 @@ function renderFilenamePanel() {
 
 
 function customAnalysisAllMenu(saved){
+
     const analyseAllMenu = document.getElementById('analyseAll');
     const modifier = isMac ? '⌘' : 'Ctrl';
     if (saved) {
-        analyseAllMenu.innerHTML = `<span class="material-symbols-outlined">upload_file</span> Get Results for All Open Files
+        analyseAllMenu.innerHTML = `<span class="material-symbols-outlined">upload_file</span> ${STATE.i18n.retrieveAll}
         <span class="shortcut float-end">${modifier}+Shift+A</span>`;
         enableMenuItem(['reanalyseAll']);
     } else {
-        analyseAllMenu.innerHTML = `<span class="material-symbols-outlined">search</span> Analyse All Open Files
+        analyseAllMenu.innerHTML = `<span class="material-symbols-outlined">search</span> ${STATE.i18n.analyseAll[0]}
         <span class="shortcut float-end">${modifier}+Shift+A</span>`;
         disableMenuItem(['reanalyseAll']);
     }   
@@ -725,11 +755,11 @@ function customiseAnalysisMenu(saved) {
     const modifier = isMac ? '⌘' : 'Ctrl';
     const analyseMenu = document.getElementById('analyse');
     if (saved) {
-        analyseMenu.innerHTML = `<span class="material-symbols-outlined">upload_file</span> Get Results for Current File
+        analyseMenu.innerHTML = `<span class="material-symbols-outlined">upload_file</span> ${STATE.i18n.retrieve}
         <span class="shortcut float-end">${modifier}+A</span>`;
         enableMenuItem(['reanalyse']);
     } else {
-        analyseMenu.innerHTML = `<span class="material-symbols-outlined">search</span> Analyse File
+        analyseMenu.innerHTML = `<span class="material-symbols-outlined">search</span> ${STATE.i18n.analyse[0]}
         <span class="shortcut float-end">${modifier}+A</span>`;
         disableMenuItem(['reanalyse']);
     }
@@ -737,7 +767,20 @@ function customiseAnalysisMenu(saved) {
 
 
 async function generateLocationList(id) {
-    const defaultText = id === 'savedLocations' ? '(Default)' : 'All';
+    const d = {
+        "en": ["(Default)", "All"],
+        "da": ["(Standard)", "Alle"],
+        "de": ["(Standard)", "Alle"],
+        "es": ["(Predeterminado)", "Todos"],
+        "fr": ["(Par défaut)", "Tout"],
+        "nl": ["(Standaard)", "Alles"],
+        "pt": ["(Padrão)", "Todos"],
+        "ru": ["(По умолчанию)", "Все"],
+        "sv": ["(Standard)", "Alla"],
+        "zh": ["(默认)", "所有"]
+      }
+    const i18n = d[locale] || d['en'];
+    const defaultText = id === 'savedLocations' ? i18n[0] : i18n[1];
     const el = document.getElementById(id);
     LOCATIONS = undefined;
     worker.postMessage({ action: 'get-locations', file: STATE.currentFile });
@@ -865,16 +908,18 @@ async function setCustomLocation() {
     STATE.openFiles.length > 1 ? batchWrapper.classList.remove('d-none') : batchWrapper.classList.add('d-none');
     // Use the current file location for lat, lon, place or use defaults
     showLocation(false);
-    savedLocationSelect.addEventListener('change', function (e) {
+    savedLocationSelect.addEventListener('change', function () {
         showLocation(true);
     })
+
+    const i18n = getI18n(i18nLocation)
     const addOrDelete = () => {
         if (customPlaceEl.value) {
-            locationAdd.textContent = 'Set Location'
+            locationAdd.textContent = i18n[0];
             locationAdd.classList.remove('btn-danger');
             locationAdd.classList.add('button-primary');
         } else {
-            locationAdd.textContent = 'Delete Location'
+            locationAdd.textContent = i18n[1];
             locationAdd.classList.add('btn-danger');
             locationAdd.classList.remove('button-primary');
         }
@@ -882,9 +927,16 @@ async function setCustomLocation() {
     // Highlight delete
     customPlaceEl.addEventListener('keyup', addOrDelete);
     addOrDelete();
+    locationModalDiv.querySelector('h5').textContent = i18n[0];
+    const legends = locationModalDiv.querySelectorAll('legend');
+    for (let i = 0; i < legends.length; i++) {
+        legends[i].textContent = i18n[i+2]; // process each node
+    }
+    locationModalDiv.querySelector('label[for="batchLocations"]').textContent = i18n[4];
+    document.getElementById('customLatLabel').textContent = i18n[5];
+    document.getElementById('customLonLabel').textContent = i18n[6];
     const locationModal = new bootstrap.Modal(locationModalDiv);
     locationModal.show();
-    
     
     // Submit action
     const locationForm = document.getElementById('locationForm');
@@ -943,7 +995,7 @@ async function onOpenFiles(args) {
     STATE.openFiles = sanitisedList;
     // CHeck not more than 25k files
     if (STATE.openFiles.length >= 25_000){
-        generateToast({message: `Chirpity limits the maximum number of open files to 25,000. Only the first 25,000 of the ${STATE.openFiles.length} attempted will be opened`})
+        generateToast({message: 'maxFiles', variables: {'STATE.openFiles.length': STATE.openFiles.length}})
         STATE.openFiles.splice(25000)
     }
     // Store the file list and Load First audio file
@@ -974,18 +1026,6 @@ async function onOpenFiles(args) {
     windowLength = 20;
 }
 
-
-/**
-*
-*
-* @returns {Promise<void>}
-*/
-async function showSaveDialog() {
-    await window.electron.saveFile({ 
-        currentFile: STATE.currentFile, 
-        labels: AUDACITY_LABELS[STATE.currentFile], 
-        type: 'audacity' });
-}
 
 function resetDiagnostics() {
     delete DIAGNOSTICS['Audio Duration'];
@@ -1050,6 +1090,7 @@ function postAnalyseMessage(args) {
         const selection = !!args.end;
         const filesInScope = args.filesInScope;
         PREDICTING = true;
+        disableSettingsDuringAnalysis(true)
         if (!selection) {
             analyseReset();
             refreshResultsView();
@@ -1068,7 +1109,7 @@ function postAnalyseMessage(args) {
             circleClicked: args.fromDB
         });
     } else {
-        generateToast({type: 'warning', message: 'An analysis is underway. Press <b>Esc</b> to cancel it before running a new analysis.'})
+        generateToast({type: 'warning', message: 'analysisUnderway'})
     }
 }
 
@@ -1078,7 +1119,7 @@ async function fetchLocationAddress(lat, lon) {
     const isInvalidLongitude = isNaN(lon) || lon === null || lon < -180 || lon > 180;
     
     if (isInvalidLatitude || isInvalidLongitude) {
-        generateToast({type: 'warning', message: 'Latitude must be between -90 and 90 and longitude between -180 and 180.'});
+        generateToast({type: 'warning', message: 'placeOutOfBounds'});
         return false;
     }
     
@@ -1116,7 +1157,7 @@ async function fetchLocationAddress(lat, lon) {
 
             } catch (error) {
                 console.warn(`A location for this point (lat: ${lat}, lon: ${lon}) could not be retrieved from OpenStreetMap:`, error);
-                generateToast({type: 'warning', message: "Failed to look up this location. Please check your internet connection or try again later."});
+                generateToast({type: 'warning', message: 'placeNotFound'});
                 resolve(`${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}`)
             } finally {
                 currentRequest = null; // Clear the current request
@@ -1181,12 +1222,13 @@ function hideAll() {
 
 async function batchExportAudio() {
     const species = isSpeciesViewFiltered(true); 
-    species ? exportData('audio', species, 1000) : generateToast({type: 'warning', message: "Filter results by species to export audio files"});
+    species ? exportData('audio', species, 1000) : generateToast({type: 'warning', message: 'mustFilterSpecies'});
 }
 
 const export2CSV = ()  => exportData('text', isSpeciesViewFiltered(true), Infinity);
 const exporteBird = ()  => exportData('eBird', isSpeciesViewFiltered(true), Infinity);
 const exportRaven = ()  => exportData('Raven', isSpeciesViewFiltered(true), Infinity);
+const exportAudacity = ()  => exportData('Audacity', isSpeciesViewFiltered(true), Infinity);
 
 async function exportData(format, species, limit, duration){
     const response = await window.electron.selectDirectory();
@@ -1331,7 +1373,7 @@ function createRegion(start, end, label, goToRegion) {
     if (region.clientWidth <= checkWidth(text)) {
         region.style.writingMode = 'vertical-rl';
     }
-    if (goToRegion) {
+    if (goToRegion && wavesurfer.isReady) {
         const progress = start / wavesurfer.getDuration();
         wavesurfer.seekAndCenter(progress);
     }
@@ -1350,7 +1392,7 @@ async function resultClick(e) {
         return
     }
     
-    const [file, start, end, sname, label] = row.getAttribute('name').split('|');
+    const [file, start, end, _, label] = row.getAttribute('name').split('|');
     // if (row.classList.contains('table-active')){
     //     createRegion(start - bufferBegin, end - bufferBegin, label, true);
     //     e.target.classList.contains('circle') && getSelectionResults(true);
@@ -1435,13 +1477,14 @@ function adjustSpecDims(redraw, fftSamples, newHeight) {
 
 ///////////////// Font functions ////////////////
     // Function to set the font size scale
-    function setFontSizeScale() {
+    function setFontSizeScale(doNotScroll) {
         document.documentElement.style.setProperty('--font-size-scale', config.fontScale);
         const decreaseBtn = document.getElementById('decreaseFont');
         const increaseBtn = document.getElementById('increaseFont');
         
         decreaseBtn.classList.toggle('disabled', config.fontScale === 0.7);
         increaseBtn.classList.toggle('disabled', config.fontScale === 1.1);
+        doNotScroll || decreaseBtn.scrollIntoView({block: 'center', behavior: 'auto'})
         updatePrefs('config.json', config)
         adjustSpecDims(true)
     }
@@ -1468,13 +1511,13 @@ function adjustSpecDims(redraw, fftSamples, newHeight) {
 */
 
 
-function formatRegionTooltip(start, end) {
+function formatRegionTooltip(regionLength, start, end) {
     const length = end - start;
     if (length === 3) {
         return `${formatTimeCallback(start)} -  ${formatTimeCallback(end)}`;
-    } else if (length < 1) return `Region length: ${(length * 1000).toFixed(0)}ms`
+    } else if (length < 1) return `${regionLength}: ${(length * 1000).toFixed(0)}ms`
     else {
-        return `Region length: ${length.toFixed(3)}s`
+        return `${regionLength}: ${length.toFixed(3)}s`
     }
 }
 
@@ -1650,7 +1693,7 @@ const defaultConfig = {
     lastUpdateCheck: 0,
     UUID: uuidv4(),
     colormap: 'inferno',
-    specMaxHeight: 512,
+    specMaxHeight: 260,
     specLabels: true,
     customColormap: {'loud': "#00f5d8", 'mid': "#000000", 'quiet': "#000000", 'threshold': 0.5, 'windowFn': 'hann'},
     timeOfDay: true,
@@ -1677,9 +1720,10 @@ const defaultConfig = {
     limit: 500,
     debug: false,
     VERSION: VERSION,
-    powerSaveBlocker: false
+    powerSaveBlocker: false,
+    fileStartMtime: false
 };
-let appPath, tempPath, isMac;
+let appPath, tempPath, systemLocale, isMac;
 window.onload = async () => {
     window.electron.requestWorkerChannel();
     isMac = await window.electron.isMac();
@@ -1687,13 +1731,18 @@ window.onload = async () => {
     DOM.contentWrapper.classList.add('loaded');
     
     // Load preferences and override defaults
-    [appPath, tempPath] = await getPaths();
+    [appPath, tempPath, systemLocale] = await getPaths();
+    // Set default locale
+    systemLocale = systemLocale.replace('en-GB', 'en_uk');
+    systemLocale = systemLocale === 'en_uk' ? systemLocale : systemLocale.slice(0,2).toLowerCase();
+    defaultConfig.chirpity.locale = systemLocale;
+    defaultConfig.birdnet.locale = systemLocale;
     // establish the message channel
     setUpWorkerMessaging()
 
     // Set footer year
     document.getElementById('year').textContent = new Date().getFullYear();
-
+    await appVersionLoaded;
     await fs.readFile(p.join(appPath, 'config.json'), 'utf8', (err, data) => {
         if (err) {
             console.log('JSON parse error ' + err);
@@ -1723,7 +1772,7 @@ window.onload = async () => {
         initWavesurfer({});
         // Set UI option state
         // Fontsize
-        config.fontScale === 1 || setFontSizeScale();
+        config.fontScale === 1 || setFontSizeScale(true);
         // Map slider value to batch size
         DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config[config.model].backend].batchSize);
         DOM.batchSizeSlider.max = (BATCH_SIZE_LIST.length - 1).toString();
@@ -1739,14 +1788,21 @@ window.onload = async () => {
 
         // Show Locale
         DOM.locale.value = config[config.model].locale;
+        LIST_MAP = getI18n(i18nLIST_MAP)
+        // Localise UI
+        localiseUI(DOM.locale.value).then(result => STATE.i18n = result);
+        initialiseDatePicker();
+        STATE.picker.options.lang = DOM.locale.value.replace('_uk', '');
+        
         // remember audio notification setting
         DOM.audioNotification.checked = config.audio.notification;
-        
+        // Zoom H1E filestart handling:
+        document.getElementById('file-timestamp').checked = config.fileStartMtime;
         // List appearance in settings 
         DOM.speciesThreshold.value = config.speciesThreshold;
         document.getElementById('species-week').checked = config.useWeek;
         DOM.customListFile.value = config.customListFile[config.model];
-        if (DOM.customListFile.value)  LIST_MAP.custom = 'Using a custom list';
+        if (! DOM.customListFile.value)  delete LIST_MAP.custom;
         // And update the icon
         updateListIcon();
         // timeline
@@ -1843,7 +1899,8 @@ window.onload = async () => {
             useWeek: config.useWeek,
             local: config.local,
             UUID: config.UUID,
-            track: config.track
+            debug: config.debug,
+            fileStartMtime: config.fileStartMtime
         });
         const {model, list} = config;
         t0_warmup = Date.now();
@@ -1857,17 +1914,17 @@ window.onload = async () => {
         myAllowList.td = [];
         myAllowList.th = [];
         const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]')
-        const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl, {allowList: myAllowList}))
+        const _ = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl, {allowList: myAllowList}))
         
 
         // check for new version on mac platform. pkg containers are not an auto-updatable target
         // https://www.electron.build/auto-update#auto-updatable-targets
-        isMac && checkForMacUpdates();
+        isMac && ! isTestEnv && checkForMacUpdates();
 
         // Add cpu model & memory to config
         config.CPU = DIAGNOSTICS['CPU'];
         config.RAM = DIAGNOSTICS['System Memory'];
-        trackVisit(config);
+        trackVisit(config)
     })
 }
 
@@ -1882,38 +1939,29 @@ const setUpWorkerMessaging = () => {
             switch (event) {
                 case 'all-files-saved-check-result': {
                     customAnalysisAllMenu(args.result)
-                    break;
-                }
+                    break }
                 case "analysis-complete": {onAnalysisComplete(args);
-                    break;
-                }
+                    break }
                 case "audio-file-to-save": {onSaveAudio(args);
-                    break;
-                }
+                    break }
                 case "chart-data": {onChartData(args);
-                    break;
-                }
+                    break }
                 case "conversion-progress": { 
                     displayProgress(args.progress, args.text)
-                    break;
-                }
+                    break }
                 case "current-file-week": { 
                     STATE.week = args.week
-                    break;
-                }
+                    break }
                 case "diskDB-has-records": {
                     DOM.chartsLink.classList.remove("disabled");
                     DOM.exploreLink.classList.remove("disabled");
                     config.archive.location && document.getElementById('compress-and-organise').classList.remove('disabled');
                     STATE.diskHasRecords = true;
-                    break;
-                }
+                    break }
                 case "file-location-id": {onFileLocationID(args);
-                    break;
-                }
+                    break }
                 case "files": {onOpenFiles(args);
-                    break;
-                }
+                    break }
                 case "generate-alert": {
                     if (args.updateFilenamePanel) {
                         renderFilenamePanel();
@@ -1936,15 +1984,13 @@ const setUpWorkerMessaging = () => {
                             </div>
                             `
                     }
-                    generateToast({ type: args.type, message: args.message, autohide: args.autohide});
+                    generateToast(args);
                     // This is how we know the database update has completed
                     if (args.database && config.archive.auto) document.getElementById('compress-and-organise').click();
-                break;
-                }
+                break }
                 // Called when last result is returned from a database query
                 case "database-results-complete": {onResultsComplete(args);
-                    break;
-                }
+                    break }
                 case "labels": { 
                     LABELS = args.labels; 
                     /* Code below to retrieve Red list data
@@ -1962,11 +2008,9 @@ const setUpWorkerMessaging = () => {
                     break }
                 case "location-list": {LOCATIONS = args.locations;
                     locationID = args.currentLocation;
-                    break;
-                }
+                    break }
                 case "model-ready": {onModelReady(args);
-                    break;
-                }
+                    break }
                 case "mode-changed": {
                     const mode = args.mode;
                     STATE.mode = mode;
@@ -1994,33 +2038,29 @@ const setUpWorkerMessaging = () => {
                         DOM.resultHeader.classList.add('text-bg-secondary');
                         DOM.resultHeader.classList.remove('text-bg-dark');   
                     }
-                    break;
-                }
+                    break }
                 case "summary-complete": {onSummaryComplete(args);
-                    break;
-                }
+                    break }
                 case "new-result": {renderResult(args);
-                    break;
-                }
+                    break }
                 case "progress": {onProgress(args);
-                    break;
-                }
+                    break }
                 // called when an analysis ends, or when the filesbeingprocessed list is empty
                 case "processing-complete": {
                     STATE.analysisDone = true;
-                    break;
-                }
+                    break }
                 case 'ready-for-tour':{
                     // New users - show the tour
-                    if (!config.seenTour) {
-                        config.seenTour = true;
-                        setTimeout(prepTour, 1500);
+                    if (!isTestEnv){
+                        if (! config.seenTour) {
+                            config.seenTour = true;
+                            const timeOut =  1500;
+                            setTimeout(prepTour, timeOut);
+                        }
                     }
-                    break;
-                }
+                    break }
                 case "seen-species-list": {generateBirdList("seenSpecies", args.list);
-                break;
-                }
+                break }
                 case 'tfjs-node': {
                     // Have we gone from a no-node setting to a node one?
                     const changedEnv = config.hasNode !== args.hasNode;
@@ -2032,34 +2072,29 @@ const setUpWorkerMessaging = () => {
                     if (!config.hasNode && config[config.model].backend !== 'webgpu'){
                         // No node? Not using webgpu? Force webgpu
                         handleBackendChange('webgpu');
-                        generateToast({type: 'warning',  message: 'The standard backend could not be loaded on this machine. An experimental backend (webGPU) has been used instead.'});
+                        generateToast({type: 'warning',  message: 'noNode'});
                         console.warn('tfjs-node could not be loaded, webGPU backend forced. CPU is', DIAGNOSTICS['CPU'])
                     }
                     modelSettingsDisplay();
-                    break;
-                }
-                case "valid-species-list": {populateSpeciesModal(args.included, args.excluded);
-                    break;
-                }
+                    break }
+                case "valid-species-list": {
+                    populateSpeciesModal(args.included, args.excluded);
+                    
+                    break }
                 case "total-records": {updatePagination(args.total, args.offset);
-                    break;
-                }
+                    break }
                 case "unsaved-records": {window.electron.unsavedRecords(true);
                     document.getElementById("unsaved-icon").classList.remove("d-none");
-                    break;
-                }
+                    break }
                 case "update-audio-duration": {DIAGNOSTICS["Audio Duration"] ??= 0;
                     DIAGNOSTICS["Audio Duration"] += args.value;
-                    break;
-                }
+                    break }
                 case "update-summary": {updateSummary(args);
-                    break;
-                }
+                    break }
                 case "worker-loaded-audio": {
                     onWorkerLoadedAudio(args);
-                    break;
-                }
-                default: {generateToast({type: 'error', message:`Unrecognised message from worker:${args.event}`});
+                    break }
+                default: {generateToast({type: 'error', message: 'badMessage', variables:{'args.event': args.event}});
                 }
             }
         })
@@ -2079,63 +2114,37 @@ function generateBirdList(store, rows) {
 
 
 function generateBirdOptionList({ store, rows, selected }) {
-    const fragment = document.createDocumentFragment();
-
-    // Create the form-floating div container
-    const formFloatingDiv = document.createElement('div');
-    formFloatingDiv.className = 'form-floating';
-
-    // Create the select element
-    const selectElement = document.createElement('select');
-    selectElement.spellcheck = false;
-    selectElement.id = store === 'allSpecies' ? 'bird-list-all' : 'bird-list-seen';
-    selectElement.className = 'input form-select mb-3';
-    selectElement.setAttribute('aria-label', '.form-select');
-    selectElement.required = true;
-
-    // Create the first option element ("All")
-    const allOption = document.createElement('option');
-    allOption.value = '';
-    allOption.textContent = 'All';
-    fragment.appendChild(allOption);
-
+    let listHTML = '';
+    const i18n = getI18n(i18nHeadings);
     if (store === 'allSpecies') {
         let sortedList = LABELS.map(label => label.split('_')[1]);
-
-        // International language sorting
-        sortedList.sort(new Intl.Collator(config[config.model].locale.replace('_uk', '')).compare);
-
+        
+        // International language sorting, recommended for large arrays - 'en_uk' not valid, but same as 'en'
+        sortedList.sort(new Intl.Collator(config[config.model].locale.replace(/_.*$/, '')).compare);
+        // Check if we have prepared this before
+        
         const lastSelectedSpecies = selected || STATE.birdList.lastSelectedSpecies;
-        for (const item of sortedList) {
-            const option = document.createElement('option');
-            option.value = item;
-            option.textContent = item;
-            if (item === lastSelectedSpecies) option.selected = true;
-            fragment.appendChild(option);
+        listHTML += '<div class="form-floating"><select spellcheck="false" id="bird-list-all" class="input form-select mb-3" aria-label=".form-select" required>';
+        listHTML += '<option value="">All</option>';
+        for (const item in sortedList) {
+            //const [sname, cname] = labels[item].split('_');
+            if (sortedList[item] !== lastSelectedSpecies) {
+                listHTML += `<option value="${sortedList[item]}">${sortedList[item]}</option>`;
+            } else {
+                listHTML += `<option value="${sortedList[item]}" selected>${sortedList[item]}</option>`;
+            }
         }
+        listHTML += `</select><label for="bird-list-all">${i18n.species[0]}</label></div>`;
     } else {
-        for (const item of rows) {
-            const option = document.createElement('option');
-            option.value = item.cname;
-            option.textContent = item.cname;
-            if (item.cname === STATE.chart.species) option.selected = true;
-            fragment.appendChild(option);
+        listHTML += '<select id="bird-list-seen" class="form-select"><option value="">All</option>';
+        for (const item in rows) {
+            const isSelected = rows[item].cname === STATE.chart.species ? 'selected' : '';
+            listHTML += `<option value="${rows[item].cname}" ${isSelected}>${rows[item].cname}</option>`;
         }
+        listHTML += `</select><label for="bird-list-seen">${i18n.species[0]}</label>`;
     }
-
-    // Append all options to the select element
-    selectElement.appendChild(fragment);
-
-    // Create the label element
-    const labelElement = document.createElement('label');
-    labelElement.htmlFor = selectElement.id;
-    labelElement.textContent = 'Species';
-
-    // Append select and label to the form-floating div
-    formFloatingDiv.appendChild(selectElement);
-    formFloatingDiv.appendChild(labelElement);
-
-    return formFloatingDiv;
+    
+    return listHTML;
 }
 
 
@@ -2177,14 +2186,14 @@ function getSpecies(target) {
 }
 
 function handleGesture(e) {
-        const key = e.deltaX > 0 ? 'PageDown'  : 'PageUp';
+        const moveDirection = e.deltaX || e.deltaY; // If deltaX is 0, use deltaY
+        const key = moveDirection > 0 ? 'PageDown'  : 'PageUp';
+        config.debug && console.log(`scrolling x: ${e.deltaX} y: ${e.deltaY}`)
         waitForFinalEvent(() => {
             GLOBAL_ACTIONS[key](e);
             trackEvent(config.UUID, 'Swipe', key, '' );
-        }, 100, 'swipe');
+        }, 200, 'swipe');
 }
-
-
 
 
 document.addEventListener('change', function (e) {
@@ -2226,8 +2235,6 @@ async function onSaveAudio({file, filename, extension}){
         filename: filename,
         extension: extension
     })
-
-        
 }
 
 
@@ -2486,7 +2493,7 @@ function onChartData(args) {
                     padding: {
                         top: 2
                     },
-                    formatter: function (value, context) {
+                    formatter: function (value, _) {
                         return value; // Customize the displayed value as needed
                     }
                 }
@@ -2567,7 +2574,7 @@ function onChartData(args) {
             dragSelection: true,
             maxRegions: 1,
             // Region length bug (likely mine) means I don't trust lengths > 60 seconds
-            maxLength: config[config[config.model].backend].batchSize * 3,
+            //maxLength: config[config[config.model].backend].batchSize * 3,
             slop: null,
             color: "rgba(255, 255, 255, 0.2)"
         })
@@ -2614,6 +2621,7 @@ function onChartData(args) {
     };
 
     async function specTooltip(event) {
+        const i18n = getI18n(i18nContext);
         const waveElement = event.target;
         const specDimensions = waveElement.getBoundingClientRect();
         const frequencyRange = Number(config.audio.maxFrequency) - Number(config.audio.minFrequency);
@@ -2621,29 +2629,14 @@ function onChartData(args) {
         
         // Update the tooltip content
         const tooltip = DOM.tooltip;
-        tooltip.textContent = `Frequency: ${yPosition}Hz`;
+        tooltip.textContent = `${i18n.frequency}: ${yPosition}Hz`;
         if (region) {
             const lineBreak = document.createElement('br');
-            const textNode = document.createTextNode(formatRegionTooltip(region.start, region.end));
+            const textNode = document.createTextNode(formatRegionTooltip(i18n.length, region.start, region.end));
             
             tooltip.appendChild(lineBreak);  // Add the line break
             tooltip.appendChild(textNode);   // Add the text node
         }
-    
-        // // Get the tooltip's dimensions
-        // tooltip.style.display = 'block';  // Ensure tooltip is visible to measure dimensions
-        // const tooltipWidth = tooltip.offsetWidth;
-        // const windowWidth = window.innerWidth;
-    
-        // // Calculate the new tooltip position
-        // let tooltipLeft;
-        
-        // // If the tooltip would overflow past the right side of the window, position it to the left
-        // if (event.clientX + tooltipWidth + 15 > windowWidth) {
-        //     tooltipLeft = event.clientX - tooltipWidth - 5;  // Position to the left of the mouse cursor
-        // } else {
-        //     tooltipLeft = event.clientX + 15;  // Position to the right of the mouse cursor
-        // }
     
         // Apply styles to the tooltip
         Object.assign(tooltip.style, {
@@ -2655,13 +2648,6 @@ function onChartData(args) {
         });
     }
 
-    const LIST_MAP = {
-        location: 'Searching for birds in your region',
-        nocturnal: 'Searching for nocturnal birds',
-        birds: 'Searching for all birds',
-        everything: 'Searching for everything'
-    };
-
     const updateListIcon = () => {
         DOM.listIcon.innerHTML = config.list === 'custom' ?
             `<span class="material-symbols-outlined mt-1" title="${LIST_MAP[config.list]}" style="width: 30px">fact_check</span>` :
@@ -2669,7 +2655,10 @@ function onChartData(args) {
 
     }
     DOM.listIcon.addEventListener('click', () => {
-        // todo: skip custom list if custom list not set
+        if (PREDICTING){
+            generateToast({message: 'changeListBlocked', type:'warning'})
+            return;
+        }
         const keys = Object.keys(LIST_MAP);
         const currentListIndex = keys.indexOf(config.list);
         const next = (currentListIndex === keys.length - 1) ? 0 : currentListIndex + 1;
@@ -2691,7 +2680,7 @@ function onChartData(args) {
             config.customListFile[config.model] = customListFile;
             DOM.customListFile.value = customListFile;
             readLabels(config.customListFile[config.model], 'list');
-            LIST_MAP.custom = 'Using a custom list';
+            LIST_MAP = getI18n(i18nLIST_MAP);
             updatePrefs('config.json', config)
         }
     })
@@ -2827,7 +2816,7 @@ function centreSpec(){
         },
         s: function (e) {
             if ( e.ctrlKey || e.metaKey) {
-                worker.postMessage({ action: 'save2db', file: STATE.currentFile});
+                document.getElementById('save2db').click();
             }
         },
         t: function (e) {
@@ -2844,10 +2833,11 @@ function centreSpec(){
         z: function (e) {
             if (( e.ctrlKey || e.metaKey) && DELETE_HISTORY.length) insertManualRecord(...DELETE_HISTORY.pop());
         },
-        Escape: function (e) {
+        Escape: function () {
             if (PREDICTING) {
                 console.log('Operation aborted');
                 PREDICTING = false;
+                disableSettingsDuringAnalysis(false);
                 STATE.analysisDone = true;
                 worker.postMessage({
                     action: 'abort',
@@ -2856,7 +2846,7 @@ function centreSpec(){
                     list: config.list
                 });
                 STATE.diskHasRecords && enableMenuItem(['explore', 'charts']);
-                generateToast({ message:'Operation cancelled'});
+                generateToast({ message:'cancelled'});
                 DOM.progressDiv.classList.add('invisible');
             }
         },
@@ -2875,8 +2865,17 @@ function centreSpec(){
         PageUp: function () {
             if (currentBuffer) {
                 const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                bufferBegin = Math.max(0, bufferBegin - windowLength);
-                postBufferUpdate({ begin: bufferBegin, position: position })
+                bufferBegin = bufferBegin - windowLength;
+                const fileIndex = STATE.openFiles.indexOf(STATE.currentFile);
+                let fileToLoad;
+                if ( fileIndex > 0 && bufferBegin < 0){
+                    bufferBegin = -windowLength;
+                    fileToLoad = STATE.openFiles[fileIndex - 1];
+                } else {
+                    bufferBegin = Math.max(0, bufferBegin);
+                    fileToLoad = STATE.currentFile
+                }
+                postBufferUpdate({ file: fileToLoad, begin: bufferBegin, position: position })
             }
         },
         ArrowUp: function () {
@@ -2890,8 +2889,18 @@ function centreSpec(){
         PageDown: function () {
             if (currentBuffer) {
                 const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-                bufferBegin = Math.min(bufferBegin + windowLength, currentFileDuration - windowLength);
-                postBufferUpdate({ begin: bufferBegin, position: position })
+                bufferBegin = bufferBegin + windowLength;
+                const fileIndex = STATE.openFiles.indexOf(STATE.currentFile);
+                let fileToLoad;
+                if ( fileIndex < STATE.openFiles.length - 1 && bufferBegin >= currentFileDuration - windowLength){
+                    // Move to next file
+                    fileToLoad = STATE.openFiles[fileIndex + 1];
+                    bufferBegin = 0;
+                } else {
+                    bufferBegin = Math.min(bufferBegin, currentFileDuration - windowLength);
+                    fileToLoad = STATE.currentFile;
+                }                
+                postBufferUpdate({ file: fileToLoad, begin: bufferBegin, position: position })
             }
         },
         ArrowDown: function () {
@@ -2927,8 +2936,8 @@ function centreSpec(){
         '=': function (e) {e.metaKey || e.ctrlKey ? reduceFFT() : zoomSpec('zoomIn')},
         '+': function (e) {e.metaKey || e.ctrlKey ? reduceFFT() : zoomSpec('zoomIn')},
         '-': function (e) {e.metaKey || e.ctrlKey ? increaseFFT() : zoomSpec('zoomOut')},
-        'F5': function (e) { reduceFFT() },
-        'F4': function (e) { increaseFFT() },
+        'F5': function () { reduceFFT() },
+        'F4': function () { increaseFFT() },
         ' ': function () { wavesurfer && wavesurfer.playPause() },
         Tab: function (e) {
             if ((e.metaKey || e.ctrlKey) && ! PREDICTING) { // If you did this when predicting, your results would go straight to the archive
@@ -2960,6 +2969,21 @@ function centreSpec(){
         } : undefined;
     }
     
+    function disableSettingsDuringAnalysis(bool){
+        DOM.modelToUse.disabled = bool;
+        DOM.threadSlider.disabled = bool;
+        DOM.batchSizeSlider.disabled = bool;
+        DOM.locale.disabled = bool;
+        DOM.listToUse.disabled = bool;
+        DOM.customListContainer.disabled = bool;  
+        DOM.localSwitchContainer.disabled = bool
+        DOM.speciesThreshold.disabled = bool;
+        DOM.speciesWeek.disabled = bool;
+        DOM.backendOptions.forEach(backend => backend.disabled = bool)
+        DOM.contextAware.disabled = bool;
+        DOM.sendFilteredAudio.disabled = bool;
+    }
+
     const postBufferUpdate = ({
         file = STATE.currentFile,
         begin = 0,
@@ -3028,7 +3052,7 @@ function centreSpec(){
                 seconds = Math.min(parseFloat(timeArray[2]), 59.999);
             } else {
                 // Invalid input
-                generateToast({type: 'warning',  message:'Invalid time format. Please enter time in one of the following formats: \n1. Float (for seconds) \n2. Two numbers separated by a colon (for minutes and seconds) \n3. Three numbers separated by colons (for hours, minutes, and seconds)'});
+                generateToast({type: 'warning',  message:'badTime'});
                 return;
             }
             let start = hours * 3600 + minutes * 60 + seconds;
@@ -3075,7 +3099,7 @@ function centreSpec(){
         location,
         start = 0,
         sourceDuration = 0,
-        bufferBegin = 0,
+        fileBegin = 0,
         file = '',
         position = 0,
         buffer = undefined,
@@ -3087,6 +3111,7 @@ function centreSpec(){
         metadata = undefined
     }) {
         fileLoaded = true, locationID = location;
+        bufferBegin = fileBegin;
         clearTimeout(loadingTimeout)
         // Clear the loading animation
         DOM.loading.classList.add('d-none');
@@ -3103,7 +3128,7 @@ function centreSpec(){
         if (queued) {
             // Prepare arguments to call this function with
             NEXT_BUFFER = {
-                start: start, sourceDuration: sourceDuration, bufferBegin: bufferBegin, file: file,
+                start: start, sourceDuration: sourceDuration, bufferBegin: fileBegin, file: file,
                 buffer: currentBuffer, play: true, resetSpec: false, queued: false
             }
         } else {
@@ -3119,10 +3144,10 @@ function centreSpec(){
             renderFilenamePanel();
 
             if (config.timeOfDay) {
-                bufferStartTime = new Date(fileStart + (bufferBegin * 1000))
+                bufferStartTime = new Date(fileStart + (fileBegin * 1000))
             } else {
                 const zero = new Date(0,0,0, 0, 0, 0, 0);
-                bufferStartTime = new Date(zero.getTime() + (bufferBegin * 1000))
+                bufferStartTime = new Date(zero.getTime() + (fileBegin * 1000))
             }
             if (windowLength > currentFileDuration) windowLength = currentFileDuration;
             
@@ -3145,15 +3170,38 @@ function centreSpec(){
             //if (activeRow) activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
-    
+    const i18nFile = {
+        en: 'File ${count} of ${fileCount}',
+        da: 'Fil ${count} af ${fileCount}',
+        de: 'Datei ${count} von ${fileCount}',
+        es: 'Archivo ${count} de ${fileCount}',
+        fr: 'Fichier ${count} sur ${fileCount}',
+        nl: 'Bestand ${count} van ${fileCount}',
+        pt: 'Arquivo ${count} de ${fileCount}',
+        ru: 'Файл ${count} из ${fileCount}',
+        sv: 'Fil ${count} av ${fileCount}',
+        zh: '文件 ${count} / ${fileCount}'
+    };
+    const awaiting = {
+        en: 'Awaiting detections',
+        da: 'Afventer detektioner',
+        de: 'Warten auf Erkennungen',
+        es: 'Esperando detecciones',
+        fr: 'En attente des détections',
+        nl: 'Wachten op detecties',
+        pt: 'Aguardando detecções',
+        ru: 'Ожидание обнаружений',
+        sv: 'Väntar på detektioner',
+        zh: '等待检测'
+    };
     function onProgress(args) {
         DOM.progressDiv.classList.remove('invisible');
         if (args.text) {
-            DOM.fileNumber.innerHTML = args.text;
+            DOM.fileNumber.innerHTML = `<span class='loading text-nowrap'>${getI18n(awaiting)}</span>`;
         } else {
             DOM.progressDiv.classList.remove('invisible');
             const count = STATE.openFiles.indexOf(args.file) + 1;
-            DOM.fileNumber.textContent = `File ${count} of ${STATE.openFiles.length}`;
+            DOM.fileNumber.textContent = interpolate(getI18n(i18nFile), {count: count, fileCount: STATE.openFiles.length});
         }
         if (args.progress) {
             let progress = Math.round(args.progress * 1000) / 10;
@@ -3170,18 +3218,20 @@ function centreSpec(){
     }
     
     const updateSummary = async ( { summary = [], filterSpecies = '' }) => {
+        const i18n = getI18n(i18nHeadings);
         const showIUCN = config.detect.iucn;
         if (summary.length){
             let summaryHTML = `<table id="resultSummary" class="table table-dark p-1"><thead>
             <tr>
-            <th class="col-3" scope="col">Max</th>
-            <th class="col-5" scope="col">Species</th>
+            <th class="col-3" scope="col">${i18n.max}</th>
+            <th class="col-5" scope="col">${i18n.species[0]}</th>
             ${showIUCN ? '<th class="col-1" scope="col"></th>' : ''}
-            <th class="col-1 text-end" scope="col">Detections</th>
-            <th class="col-1 text-end" scope="col">Calls</th>
+            <th class="col-1 text-end" scope="col">${i18n.detections}</th>
+            <th class="col-1 text-end" scope="col">${i18n.calls}</th>
             </tr>
             </thead><tbody id="speciesFilter">`;
             let selectedRow = null;
+            const i18nIUCN = getI18n(IUCNLabel);
             for (let i = 0; i < summary.length; i++) {
                 const item = summary[i];
                 const selected = item.cname === filterSpecies ? ' text-warning' : '';
@@ -3198,9 +3248,8 @@ function centreSpec(){
                     const iucn = record?.scopes.find(obj => obj.scope === config.detect.iucnScope);
                     const status = iucn?.status || 'NA';
                     const url = iucn?.url ? 'https://www.iucnredlist.org/species/' + iucn.url : null;
-
                     summaryHTML+=
-                        `<td class="text-end"><a title="${IUCNLabel[status]}: Learn more about this species ICUN assessment" 
+                        `<td class="text-end"><a id="iucn-link-${item.sname}" title="${i18nIUCN[status]}" 
                         class="d-inline-block p-1 w-100 rounded text-decoration-none text-center ${IUCNMap[status]} ${!url ? 'disabled-link' : ''}"
                         href="${url || '#'}" target="_blank"> ${status}</a></td>`;
                 }
@@ -3227,6 +3276,7 @@ function centreSpec(){
     */
     function onResultsComplete({active = undefined, select = undefined} = {}){
         PREDICTING = false;
+        disableSettingsDuringAnalysis(false)
         DOM.resultTable.replaceWith(resultsBuffer);
         const table = DOM.resultTable;
         showElement(['resultTableContainer', 'resultsHead'], false);
@@ -3291,6 +3341,7 @@ function formatDuration(seconds){
 
     function onAnalysisComplete({quiet}){
         PREDICTING = false;
+        disableSettingsDuringAnalysis(false)
         STATE.analysisDone = true;
         STATE.diskHasRecords && enableMenuItem(['explore', 'charts']);
         DOM.progressDiv.classList.add('invisible');
@@ -3302,13 +3353,13 @@ function formatDuration(seconds){
         const rate = duration / analysisTime;
         
         trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Audio Duration', config[config.model].backend, Math.round(duration));
-        trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Duration', config[config.model].backend, parseInt(analysisTime));
-        trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Rate', config[config.model].backend, parseInt(rate));
         
         if (! STATE.selection){
+            trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Rate', config[config.model].backend, parseInt(rate));
+            trackEvent(config.UUID, `${config.model}-${config[config.model].backend}`, 'Analysis Duration', config[config.model].backend, parseInt(analysisTime));
             DIAGNOSTICS['Analysis Duration'] = formatDuration(analysisTime);
             DIAGNOSTICS['Analysis Rate'] = rate.toFixed(0) + 'x faster than real time performance.';
-            generateToast({ message:'Analysis complete.'});
+            generateToast({ message:'complete'});
             activateResultFilters();
         }
     }
@@ -3320,17 +3371,16 @@ function formatDuration(seconds){
         filterSpecies = undefined,
         audacityLabels = {},
         summary = [],
-        active = undefined,
     }) {
         updateSummary({ summary: summary, filterSpecies: filterSpecies });
         if (! PREDICTING  || STATE.mode !== 'analyse') activateResultFilters();
         // Why do we do audacity labels here?
         AUDACITY_LABELS = audacityLabels;
-        if (isEmptyObject(AUDACITY_LABELS)) {
-            disableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save-Raven', 'save2db']);
-        } else {
+        if (summary.length) {
             enableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save-Raven']);
             STATE.mode !== 'explore' && enableMenuItem(['save2db'])            
+        } else {
+            disableMenuItem(['saveLabels', 'saveCSV', 'save-eBird', 'save-Raven', 'save2db']);
         }
         if (STATE.currentFile) enableMenuItem(['analyse'])
     }
@@ -3339,7 +3389,7 @@ function formatDuration(seconds){
     const pagination = document.querySelectorAll('.pagination');
     pagination.forEach(item => {
         item.addEventListener('click', (e) => {
-            if (e.target.tagName === 'A') { // Did we click a link in the list?
+            if (STATE.analysisDone && e.target.tagName === 'A') { // Did we click a link in the list?
                 let clicked = e.target.textContent;
                 let currentPage = pagination[0].querySelector('.active');
                 currentPage = parseInt(currentPage.textContent);
@@ -3416,7 +3466,7 @@ function formatDuration(seconds){
     }
     
     // TODO: show every detection in the spec window as a region on the spectrogram
-    
+
     async function renderResult({
         index = 1,
         result = {},
@@ -3426,11 +3476,6 @@ function formatDuration(seconds){
     }) {
 
         let tr = '';
-        if (typeof (result) === 'string') {
-            // const nocturnal = config.detect.nocmig ? '<b>during the night</b>' : '';
-            generateToast({ message: result});
-            return
-        }
         if (index <= 1) {
             adjustSpecDims(true)
             if (selection) {
@@ -3438,20 +3483,17 @@ function formatDuration(seconds){
                 selectionTable.textContent = '';
             }
             else {
-                //adjustSpecDims(true); 
-                //if (isFromDB) PREDICTING = false;
-                
+                const i18n = getI18n(i18nHeadings);
                 DOM.resultHeader.innerHTML =`
                 <tr>
-                    <th id="sort-time" class="time-sort col text-start timeOfDay" title="Sort results by detection time"><span class="text-muted material-symbols-outlined time-sort-icon d-none">sort</span> Time</th>
-                    <th id="sort-position" class="time-sort text-start timestamp" title="Sort results by detection time"><span class="text-muted material-symbols-outlined time-sort-icon d-none">sort</span> Position</th>
-                    <th id="confidence-sort" class="text-start" title="Sort results by detection confidence"><span class="text-muted material-symbols-outlined species-sort-icon d-none">sort</span> Species</th>
-                    <th class="text-end">Calls</th>
-                    <th class="col">Label</th>
-                    <th class="col text-end">Notes</th>
+                    <th id="sort-time" class="time-sort col text-start timeOfDay" title="${i18n.time[1]}"><span class="text-muted material-symbols-outlined time-sort-icon d-none">sort</span> ${i18n.time[0]}</th>
+                    <th id="sort-position" class="time-sort text-start timestamp" title="${i18n.position[1]}"><span class="text-muted material-symbols-outlined time-sort-icon d-none">sort</span> ${i18n.position[0]}</th>
+                    <th id="confidence-sort" class="text-start" title="${i18n.species[1]}"><span class="text-muted material-symbols-outlined species-sort-icon d-none">sort</span> ${i18n.species[0]}</th>
+                    <th class="text-end">${i18n.calls}</th>
+                    <th class="col">${i18n.label}</th>
+                    <th class="col text-end">${i18n.notes}</th>
                 </tr>`;
                 setTimelinePreferences();
-                //showSortIcon();
                 showElement(['resultTableContainer', 'resultsHead'], false);
             }
         }  else if (!isFromDB && index % (config.limit + 1) === 0) {
@@ -3482,7 +3524,7 @@ function formatDuration(seconds){
             `<span title="${comment.replaceAll('"', '&quot;')}" class='material-symbols-outlined pointer'>comment</span>` : '';
             const isUncertain = score < 65 ? '&#63;' : '';
             // store result for feedback function to use
-            predictions[index] = result;
+            if (!selection) predictions[index] = result;
             // Format date and position for  UI
             const tsArray = new Date(timestamp).toString().split(' ');
             const UI_timestamp = `${tsArray[2]} ${tsArray[1]} ${tsArray[3].substring(2)}<br/>${tsArray[4]}`;
@@ -3494,14 +3536,13 @@ function formatDuration(seconds){
             const labelHTML = label ? tags[label] : '';
             const hide = selection ? 'd-none' : '';
             const countIcon = count > 1 ? `<span class="circle pointer" title="Click to view the ${count} detections at this timecode">${count}</span>` : '';
-            //const XC_type = cname.includes('(song)') ? "song" : "nocturnal flight call";
             tr += `<tr tabindex="-1" id="result${index}" name="${file}|${position}|${end || position + 3}|${sname}|${cname}${isUncertain}" class='${activeTable} border-top border-2 border-secondary ${dayNight}'>
             <td class='text-start text-nowrap timeOfDay ${showTimeOfDay}'>${UI_timestamp}</td>
             <td class="text-start timestamp ${showTimestamp}">${UI_position} </td>
             <td name="${cname}" class='text-start cname'>
             <span class="cname">${cname}</span> ${countIcon} ${iconizeScore(score)}
             </td>
-            <td class="text-end call-count ${hide}">${callCount || 'Present'} </td>
+            <td class="text-end call-count ${hide}">${callCount || '1'} </td>
             
             <td class="label ${hide}">${labelHTML}</td>
             <td class="comment text-end ${hide}">${commentHTML}</td>
@@ -3524,7 +3565,6 @@ function formatDuration(seconds){
         const table = isSelection ? document.getElementById('selectionResultTableBody')
         : document.getElementById('resultTableBody');
         if (isFromDB && !isSelection) {
-            //if (!resultsBuffer) resultsBuffer = table.cloneNode();
             resultsBuffer.lastElementChild ?
             resultsBuffer.lastElementChild.insertAdjacentHTML('afterend', row) :
             resultsBuffer.innerHTML = row;
@@ -3595,7 +3635,6 @@ function formatDuration(seconds){
             const comment = target.querySelector('.comment').innerText;
             const label = target.querySelector('.label').innerText;
             let callCount = target.querySelector('.call-count').innerText;
-            callCount = callCount.replace('Present', '');
             DELETE_HISTORY.push([species, start, end, comment, callCount, label, undefined, undefined, undefined, confidence])
             
             worker.postMessage({
@@ -3658,20 +3697,16 @@ function formatDuration(seconds){
         let metadata = {
             lat: parseFloat(config.latitude),
             lon: parseFloat(config.longitude),
-            Artist: 'Chirpity',
-            version: VERSION
+            Artist: 'Chirpity ' + VERSION.toString(),
         };
         if (result) {
             const date = new Date(result.timestamp);
             metadata = {
                 ...metadata,
-                UUID: config.UUID,
-                start: start,
-                end: end,
                 //filename: result.file,
-                cname: result.cname,
-                sname: result.sname,
-                score: parseInt(result.score),
+                Genre: result.sname.split(' ')[0],
+                Title: `${result.cname} - ${result.sname}`,
+                Track: parseInt(result.score),
                 Year: date.getFullYear()
             };
         }
@@ -3683,7 +3718,7 @@ function formatDuration(seconds){
             })
         } else {
             if (!config.seenThanks) {
-                generateToast({ message:'Thank you, your feedback helps improve Chirpity predictions'});
+                generateToast({ message:'feedback'});
                 config.seenThanks = true;
                 updatePrefs('config.json', config)
             }
@@ -3723,17 +3758,83 @@ function formatDuration(seconds){
         sendFile('save', result)
     }
     
+    async function localiseModal(filename, locale) {
+        try {
+            // Fetch the HTML file
+            if (['usage','settings', 'ebird'].includes(filename)){
+                filename = `Help/${filename}.${locale}.html`;
+                const htmlResponse = await fetch(filename);
+                if (!htmlResponse.ok) throw new Error(`Failed to load HTML file: ${filename}`);
+                return await htmlResponse.text();
+            } 
+            // Put the filename into its path:
+            filename = `Help/${filename}.html`;
+            const htmlResponse = await fetch(filename);
+            if (!htmlResponse.ok) throw new Error(`Failed to load HTML file: ${filename}.html`);
+        
+            const htmlContent = await htmlResponse.text();
+
+              // Try fetching the localisation JSON file
+            let localisationData = {};
+            try {
+                // Fetch the localisation JSON file
+                const basename = p.basename(filename, '.html')
+                const jsonResponse = await fetch(p.join('I18n', `${basename}.${locale}.json`))
+                if (jsonResponse.ok) {
+                    localisationData = await jsonResponse.json();
+                } else {
+                    console.warn(`JSON file not found: ${filename} parsed to ${locale}.json`);
+                    return htmlContent; // Return unmodified HTML if JSON not found
+                }
+            } catch (error) {
+                console.warn(`Failed to fetch JSON file: ${filename} parsed to ${locale}.json`, error);
+                return htmlContent; // Return unmodified HTML if JSON fetch fails
+            }
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlContent, 'text/html');
+        
+            // Update elements in the parsed HTML
+            for (const key in localisationData) {
+                if (localisationData.hasOwnProperty(key)) {
+                    const element = doc.getElementById(key);
+                    if (element) {
+                        element.innerHTML = Array.isArray(localisationData[key])
+                            ? localisationData[key].join('<br>')
+                            : localisationData[key];
+                    }
+                }
+            }
+        
+            // Return the modified HTML content as a string
+            return doc.documentElement.outerHTML;
+        } catch (error) {
+            console.error('Localisation Error:', error.message);
+            return null; // Return null if there was an error
+        }
+    }
+
 
     const populateHelpModal = async (file, label) => {
         document.getElementById('helpModalLabel').textContent = label;
-        const response = await fetch(file);
-        document.getElementById('helpModalBody').innerHTML = await response.text();
+        let locale = config[config.model].locale;
+        const translations = ['en', 'da', 'de', 'es', 'fr', 'nl', 'pt', 'ru', 'sv', 'zh'];
+        locale = translations.includes(locale) ? locale : 'en';
+        const response = await localiseModal(file, locale)
+        document.getElementById('helpModalBody').innerHTML = response;
         const help = new bootstrap.Modal(document.getElementById('helpModal'));
         document.removeEventListener('show.bs.modal', replaceCtrlWithCommand);
         document.addEventListener('show.bs.modal', replaceCtrlWithCommand);
+        const close = {
+            da: 'Luk', de: 'Schließen', en: 'Close', es: 'Cerrar',
+            fr: 'Fermer', nl: 'Sluiten', pt: 'Fechar', ru: 'Закрыть',
+            sv: 'Stäng',  zh: '关闭'            
+          }
+        document.getElementById('help-modal-close').innerText = close[locale];
         help.show();
     }
-    function replaceTextInTitleAttributes() {
+
+    function _replaceTextInTitleAttributes() {
         // Select all elements with title attribute in the body of the web page
         const elementsWithTitle = document.querySelectorAll('[title]');
         
@@ -3744,7 +3845,7 @@ function formatDuration(seconds){
         });
     }
     
-    function replaceTextInTextNode(node) {
+    function _replaceTextInTextNode(node) {
         node.nodeValue = node.nodeValue.replaceAll('Ctrl', '⌘');
     }
     
@@ -3761,41 +3862,51 @@ function formatDuration(seconds){
             }
             
             // Replace 'Ctrl' with ⌘ in each text node
-            nodes.forEach(node => replaceTextInTextNode(node));
+            nodes.forEach(node => _replaceTextInTextNode(node));
             
             // Replace 'Ctrl' with ⌘ in title attributes of elements
-            replaceTextInTitleAttributes();
+            _replaceTextInTitleAttributes();
         }
     }
     
     const populateSpeciesModal = async (included, excluded) => {
-        const count = included.length;
-        const current_file_text =  STATE.week !== -1 && STATE.week ? `. The current file was saved in week <b>${STATE.week}</b>` : '';
-        const model = config.model === 'birdnet' ? 'BirdNET' : 'Chirpity';
-        const localBirdsOnly = config.local && config.model === 'birdnet' && config.list === 'nocturnal' ? ' limited to <b>local birds</b>' : '';
-        const species_filter_text = config.useWeek && config.list === 'location' ? `week-specific species filter threshold of <b>${config.speciesThreshold}</b>` : config.list === 'location' ? `species filter threshold of <b>${config.speciesThreshold}</b>` : '';  
-        const location_filter_text = config.list === 'location' ? ` focused on <b>${place.textContent.replace('fmd_good', '')}</b>, with a ${species_filter_text}${current_file_text}` : '';
-        let includedContent = `<br/><p>The number of species detected depends on the model, the list being used and in the case of the location filter, the species filter threshold and possibly the week in which the recording was made.<p>
-        You are using the <b>${model}</b> model and the <b>${config.list}</b> list${localBirdsOnly}${location_filter_text}. With these settings, Chirpity will display detections for ${config.useWeek && config.list === 'location' && (STATE.week === -1 || !STATE.week ) ? 'up to' : ''} 
-        <b>${count}</b> classes${config.useWeek && config.list === 'location' && (STATE.week === -1 || !STATE.week ) ? ', depending on the date of the file you analyse' : ''}:</p>`;
-        includedContent += '<table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>Common Name</th><th>Scientific Name</th></tr></thead><tbody>\n';
-        includedContent += generateBirdIDList(included);
-        includedContent += '</tbody></table>\n';
+        const i18n = getI18n(i18nSpeciesList);
+        const current_file_text =  STATE.week !== -1 && STATE.week ? interpolate(i18n.week, {week: STATE.week}) : '';
+        const model = config.model === 'birdnet' ? 'BirdNET' : 'Nocmig';
+        const localBirdsOnly = config.local && config.model === 'birdnet' && config.list === 'nocturnal' ? i18n.localBirds : '';
+        let species_filter_text = '', location_filter_text = '';
+        if (config.list === 'location'){
+            const weekSpecific = config.useWeek ? i18n.weekSpecific : '';
+            species_filter_text = interpolate(i18n.threshold, {weekSpecific: weekSpecific, speciesThreshold: config.speciesThreshold});  
+            location_filter_text = interpolate(i18n.location, {place: place.textContent.replace('fmd_good', ''), current_file_text: current_file_text, species_filter_text: species_filter_text});
+        }
+        const includedList = generateBirdIDList(included);
+        const depending = config.useWeek && config.list === 'location' && (STATE.week === -1 || !STATE.week ) ? i18n.depending : '';
+        const listLabel = getI18n(i18nLists)[config.list];
+        const includedContent = interpolate(i18n.included, 
+            {model: model, 
+            listInUse: listLabel, 
+            location_filter_text: location_filter_text, 
+            localBirdsOnly: localBirdsOnly,
+            upTo: i18n.upTo, 
+            count: included.length,
+            depending: depending,
+            includedList: includedList})
         let excludedContent = '', disable = '';
         if (excluded){
-            excludedContent += `<br/><p>Conversely, the application will not display detections among the following ${excluded.length} classes:</p><table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>Common Name</th><th>Scientific Name</th></tr></thead><tbody>\n`;
-            excludedContent += generateBirdIDList(excluded);
-            excludedContent += '</tbody></table>\n';
+            const excludedList = generateBirdIDList(excluded);
+
+            excludedContent = interpolate(i18n.excluded, {excludedList: excludedList, excludedCount: excluded.length, cname: i18n.cname, sname: i18n.sname })
         } else {
             disable = ' disabled'
         }
         let modalContent =  `
         <ul class="nav nav-tabs" id="myTab" role="tablist">
         <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="included-tab" data-bs-toggle="tab" data-bs-target="#included-tab-pane" type="button" role="tab" aria-controls="included-tab-pane" aria-selected="true">Included</button>
+        <button class="nav-link active" id="included-tab" data-bs-toggle="tab" data-bs-target="#included-tab-pane" type="button" role="tab" aria-controls="included-tab-pane" aria-selected="true">${i18n.includedButton}</button>
         </li>
         <li class="nav-item" role="presentation">
-        <button class="nav-link" id="excluded-tab" data-bs-toggle="tab" data-bs-target="#excluded-tab-pane" type="button" role="tab" aria-controls="excluded-tab-pane" aria-selected="false" ${disable}>Excluded</button>
+        <button class="nav-link" id="excluded-tab" data-bs-toggle="tab" data-bs-target="#excluded-tab-pane" type="button" role="tab" aria-controls="excluded-tab-pane" aria-selected="false" ${disable}>${i18n.excludedButton}</button>
         </li>
         </ul>
         <div class="tab-content" id="myTabContent">
@@ -3804,6 +3915,7 @@ function formatDuration(seconds){
         </div>
         `;
         document.getElementById('speciesModalBody').innerHTML = modalContent;
+        document.getElementById('speciesModalLabel').textContent = i18n.title;
         const species = new bootstrap.Modal(document.getElementById('speciesModal'));
         species.show();
         STATE.includedList = included;
@@ -3827,13 +3939,14 @@ function formatDuration(seconds){
     }
     
     function setNocmig(on) {
+        const i18n = getI18n(i18nTitles);
         if (on) {
             DOM.nocmigButton.textContent = 'nights_stay';
-            DOM.nocmigButton.title = 'Nocmig mode on';
+            DOM.nocmigButton.title = i18n.nocmigOn;
             DOM.nocmigButton.classList.add('text-info');
         } else {
             DOM.nocmigButton.textContent = 'bedtime_off';
-            DOM.nocmigButton.title = 'Nocmig mode off';
+            DOM.nocmigButton.title = i18n.nocmigOff;
             DOM.nocmigButton.classList.remove('text-info');
         }
         DOM.nocmig.checked = config.detect.nocmig;
@@ -3896,12 +4009,13 @@ function formatDuration(seconds){
     }
 
     const contextAwareIconDisplay = () => {
+        const i18n = getI18n(i18nTitles);
         if (config.detect.contextAware) {
             DOM.contextAwareIcon.classList.add('text-warning');
-            DOM.contextAwareIcon.title = "Context aware mode enabled";
+            DOM.contextAwareIcon.title = i18n.contextModeOn;
         } else {
             DOM.contextAwareIcon.classList.remove('text-warning');
-            DOM.contextAwareIcon.title = "Context aware mode disabled";
+            DOM.contextAwareIcon.title = i18n.contextModeOff;
         }
     };
     
@@ -3915,10 +4029,12 @@ function formatDuration(seconds){
         showFilterEffect();
         filterIconDisplay();
     }
-    
-
-    
+       
     const toggleContextAwareMode = () => {
+        if (PREDICTING){
+            generateToast({message: 'contextBlocked', type:'warning'})
+            return;
+        }
         if (config.model !== 'birdnet') config.detect.contextAware = !config.detect.contextAware;
         DOM.contextAware.checked = config.detect.contextAware;
         contextAwareIconDisplay();
@@ -4072,6 +4188,10 @@ function formatDuration(seconds){
     ////////// Date Picker ///////////////
     
     function initialiseDatePicker() {
+        if (STATE.picker) {
+            STATE.picker.destroy();
+            delete STATE.picker
+        }
         const currentDate = new Date();
         
         const thisYear = () => {
@@ -4120,9 +4240,15 @@ function formatDuration(seconds){
             return [middayYesterday, middayToday];
         };
         ['chartRange', 'exploreRange'].forEach(function(element) {
+            const i18n = getI18n(i18nContext);
             element = document.getElementById(element);
-            const picker = new easepick.create({
+            STATE.picker = new easepick.create({
                 element: element,
+                lang: config[config.model].locale.replace(/_.*$/, ''),
+                locale: {
+                    cancel: i18n.cancel,
+                    apply: i18n.apply
+                },
                 css: [
                     './node_modules/@easepick/bundle/dist/index.css',
                 ],
@@ -4133,24 +4259,24 @@ function formatDuration(seconds){
                 plugins: [
                     "RangePlugin",
                     "PresetPlugin",
-                    "KbdPlugin",
                     "TimePlugin"
                 ],
                 PresetPlugin: {
                     customPreset: {
-                        'Last Night': lastNight(),
-                        'This Week': thisWeek(),
-                        'Last Week': lastWeek(),
-                        'This Month': thisMonth(),
-                        'Last Month': lastMonth(),
-                        'This Year': thisYear(),
-                        'Last Year': lastYear()
+                        [i18n.lastNight]: lastNight(),
+                        [i18n.thisWeek]: thisWeek(),
+                        [i18n.lastWeek]: lastWeek(),
+                        [i18n.thisMonth]: thisMonth(),
+                        [i18n.lastMonth]: lastMonth(),
+                        [i18n.thisYear]: thisYear(),
+                        [i18n.lastYear]: lastYear()
                     }
                 },
                 TimePlugin: {
                     format: 'HH:mm',
                 },
             });
+            const picker = STATE.picker;
             picker.on('select', (e) =>{
                 const {start, end} = e.detail;
                 console.log('Range Selected!', JSON.stringify(e.detail))
@@ -4199,23 +4325,22 @@ function formatDuration(seconds){
                     //element.innerHTML = savedContent;
                 }
             })
-            picker.on('show', (e) =>{
+            picker.on('show', () =>{
                 picker.setStartTime('12:00')
                 picker.setEndTime('12:00')
                 
             })
-            picker.on('hide', (e) =>{
+            picker.on('hide', () =>{
                 const id = STATE.mode === 'chart' ? 'chartRange' : 'exploreRange';
                 const element = document.getElementById(id);
                 if (! element.textContent){
                     // It's blank
-                    element.innerHTML = '<span class="material-symbols-outlined align-bottom">date_range</span><span>Apply a date filter</span> <span class="material-symbols-outlined float-end">expand_more</span>';
-                } else if ( ! element.textContent.includes('Apply a date filter')){
+                    element.innerHTML = `<span class="material-symbols-outlined align-bottom">date_range</span><span>${STATE.i18n['explore-datefilter']}</span> <span class="material-symbols-outlined float-end">expand_more</span>`;
+                } else if ( ! element.textContent.includes(STATE.i18n['explore-datefilter'])){
                     createDateClearButton(element, picker);
                 }
             })
         })
-        
     }
     
     function createDateClearButton(element, picker){
@@ -4228,7 +4353,7 @@ function formatDuration(seconds){
         span.addEventListener('click', (e) =>{
             e.stopImmediatePropagation();
             picker.clear();
-            element.innerHTML = '<span class="material-symbols-outlined align-bottom">date_range</span><span>Apply a date filter</span> <span class="material-symbols-outlined float-end">expand_more</span>';
+            element.innerHTML = `<span class="material-symbols-outlined align-bottom">date_range</span><span>${STATE.i18n['explore-datefilter']}</span> <span class="material-symbols-outlined float-end">expand_more</span>`;
         })
     }
     
@@ -4280,7 +4405,6 @@ function formatDuration(seconds){
                 });
             })
         }
-        initialiseDatePicker();
     });
     
     
@@ -4343,12 +4467,13 @@ function formatDuration(seconds){
 
     // Filter handling
     const filterIconDisplay = () => {
+        const i18n = getI18n(i18nTitles);
         if (config.filters.active && (config.filters.highPassFrequency || (config.filters.lowShelfAttenuation && config.filters.lowShelfFrequency) || config.filters.SNR)) {
             DOM.audioFiltersIcon.classList.add('text-warning');
-            DOM.audioFiltersIcon.title = 'Experimental audio filters applied';
+            DOM.audioFiltersIcon.title = i18n.audioFiltersOn;
         } else {
             DOM.audioFiltersIcon.classList.remove('text-warning')
-            DOM.audioFiltersIcon.title = 'No audio filters applied';
+            DOM.audioFiltersIcon.title = i18n.audioFiltersOff;
         }
     }
     // High pass threshold
@@ -4392,6 +4517,7 @@ function formatDuration(seconds){
         worker.postMessage({ action: 'update-state', filters: { highPassFrequency: config.filters.highPassFrequency } })
         showFilterEffect();
         filterIconDisplay();
+        HPSlider.blur(); // Fix slider capturing thefocus so you can't use spaceBar or hit 'p' directly
     }
     
     const HPThreshold = document.getElementById('HP-threshold');
@@ -4407,6 +4533,7 @@ function formatDuration(seconds){
         worker.postMessage({ action: 'update-state', filters: { lowShelfFrequency: config.filters.lowShelfFrequency } })
         showFilterEffect();
         filterIconDisplay();
+        LowShelfSlider.blur(); // Fix slider capturing thefocus so you can't use spaceBar or hit 'p' directly
     }
     
     const LowShelfThreshold = document.getElementById('LowShelf-threshold');
@@ -4422,6 +4549,7 @@ function formatDuration(seconds){
         worker.postMessage({ action: 'update-state', filters: { lowShelfAttenuation: config.filters.lowShelfAttenuation } })
         showFilterEffect();
         filterIconDisplay();
+        lowShelfAttenuation.blur();
     }
     
     const lowShelfAttenuation = document.getElementById('attenuation');
@@ -4456,7 +4584,7 @@ function playRegion(){
     // Audio preferences:
     
     const showRelevantAudioQuality = () => {
-        if (['mp3', 'opus'].includes(config.audio.format)) {
+        if (['mp3', 'opus', 'aac'].includes(config.audio.format)) {
             DOM.audioBitrateContainer.classList.remove('d-none');
             DOM.audioQualityContainer.classList.add('d-none');
         } else if (config.audio.format === 'flac') {
@@ -4468,15 +4596,18 @@ function playRegion(){
         }
     }
 
+      
     
     document.addEventListener('click', function (e) {
-        const target = e.target.closest('[id]')?.id;
+        const element = e.target;
+        const target = element.closest('[id]')?.id;
+        const locale = config[config.model].locale.replace(/_.*$/, '');
         switch (target)
         {
             // File menu
             case 'open-file': { showOpenDialog('openFile'); break }
             case 'open-folder': { showOpenDialog('openDirectory'); break }
-            case 'saveLabels': { showSaveDialog(); break }
+            case 'saveLabels': { exportAudacity(); break }
             case 'saveCSV': { export2CSV(); break }
             case 'save-eBird': { exporteBird(); break }
             case 'save-Raven': { exportRaven(); break }
@@ -4523,15 +4654,14 @@ function playRegion(){
                 if (STATE.currentFile) updateList();
                 break;
             }
-                        
             // Help Menu
-            case 'keyboardHelp': { (async () => await populateHelpModal('Help/keyboard.html', 'Keyboard shortcuts'))(); break }
-            case 'settingsHelp': { (async () => await populateHelpModal('Help/settings.html', 'Settings Help'))(); break }
-            case 'usage': { (async () => await populateHelpModal('Help/usage.html', 'Usage Guide'))(); break }
-            case 'bugs': { (async () => await populateHelpModal('Help/bugs.html', 'Join the Chirpity Users community'))(); break }
+            case 'keyboardHelp': { (async () => await populateHelpModal('keyboard', i18nHelp.keyboard[locale]))(); break }
+            case 'settingsHelp': { (async () => await populateHelpModal('settings', i18nHelp.settings[locale]))(); break }
+            case 'usage': { (async () => await populateHelpModal('usage', i18nHelp.usage[locale]))(); break }
+            case 'bugs': { (async () => await populateHelpModal('community', i18nHelp.community[locale]))(); break }
             case 'species': { worker.postMessage({action: 'get-valid-species', file: STATE.currentFile}); break }
             case 'startTour': { prepTour(); break }
-            case 'eBird': { (async () => await populateHelpModal('Help/ebird.html', 'eBird Record FAQ'))(); break }
+            case 'eBird': { (async () => await populateHelpModal('ebird', i18nHelp.eBird[locale]))(); break }
             case 'copy-uuid': { 
                 // Get the value from the input element
                 const copyText = document.getElementById('uuid').textContent.split('\n')[0];
@@ -4548,16 +4678,19 @@ function playRegion(){
                     }).catch(error => console.warn(error))  ;
                 break;
             }
+
+            // Context-menu
+            case 'play-region': { playRegion(); break }
+            case 'context-analyse-selection': {getSelectionResults(); break }
+            case 'context-create-clip': {
+                element.closest('#inSummary') ? batchExportAudio() : exportAudio();
+                break;
+            }
             // --- Backends
             case 'tensorflow':
             case 'webgl':
             case 'webgpu':{
-                if (PREDICTING){
-                    generateToast({message: 'It is not possible to change the model backend while an analysis is underway', type:'warning'})
-                    document.getElementById(config[config.model].backend).checked = true;
-                } else {
-                    handleBackendChange(target);
-                }
+                handleBackendChange(target);
                 break;
             }
 
@@ -4593,7 +4726,21 @@ function playRegion(){
                 break;
             }
             case 'reset-defaults': {
-                if (confirm('Are you sure you want to revert to the default settings? You will need to relaunch Chirpity to see the changes.')){
+                const i18n = {
+                    "en": "Are you sure you want to revert to the default settings? You will need to relaunch Chirpity to see the changes.",
+                    "da": "Er du sikker på, at du vil gendanne standardindstillingerne? Du skal genstarte Chirpity for at se ændringerne.",
+                    "de": "Sind Sie sicher, dass Sie die Standardeinstellungen wiederherstellen möchten? Sie müssen Chirpity neu starten, um die Änderungen zu sehen.",
+                    "es": "¿Está seguro de que desea restablecer la configuración predeterminada? Tendrá que reiniciar Chirpity para ver los cambios.",
+                    "fr": "Êtes-vous sûr de vouloir rétablir les paramètres par défaut ? Vous devrez relancer Chirpity pour voir les modifications.",
+                    "nl": "Weet u zeker dat u wilt terugkeren naar de standaardinstellingen? U moet Chirpity opnieuw starten om de wijzigingen te zien.",
+                    "pt": "Tem certeza de que deseja restaurar as configurações padrão? Você precisará reiniciar o Chirpity para ver as alterações.",
+                    "ru": "Вы уверены, что хотите восстановить настройки по умолчанию? Вам нужно будет перезапустить Chirpity, чтобы увидеть изменения.",
+                    "sv": "Är du säker på att du vill återställa till standardinställningarna? Du måste starta om Chirpity för att se ändringarna.",
+                    "zh": "您确定要恢复默认设置吗？您需要重新启动 Chirpity 才能看到更改。"
+                }
+                const locale = config[config.model].locale 
+                const message = i18n[locale] || i18n['en'];
+                if (confirm(message)){
                     const uuid = config.UUID;
                     config = defaultConfig;
                     config.UUID = uuid;
@@ -4632,12 +4779,8 @@ function playRegion(){
                 break
             }
             case 'speciesFilter': { speciesFilter(e); break}
-            case 'context-menu': { 
-                e.target.closest('.play') && typeof region !== 'undefined' ? playRegion() : console.log('Region undefined')
-                break;
-            }
             case 'audioFiltersIcon': { toggleFilters(); break }
-            //case 'context-mode': { toggleContextAwareMode(); break }
+            case 'context-mode': { toggleContextAwareMode(); break }
             case 'frequency-range': { 
                 document.getElementById('frequency-range-panel').classList.toggle('d-none');
                 document.getElementById('frequency-range').classList.toggle('active');
@@ -4662,8 +4805,8 @@ function playRegion(){
             }
             case 'clear-call-cache': {
                 const data = fs.rm(p.join(appPath, 'XCcache.json'), err =>{
-                    if (err) generateToast({type: 'error', message: 'No call cache was found.'}) && config.debug && console.log('No XC cache found', err);
-                    else generateToast({message: 'The call cache was successfully cleared.'})
+                    if (err) generateToast({type: 'error', message: 'noCallCache'}) && config.debug && console.log('No XC cache found', err);
+                    else generateToast({message: 'callCacheCleared'})
                 })
                 break;
             }
@@ -4688,7 +4831,7 @@ function playRegion(){
     })
     
     function updateList () {
-        STATE.analysisDone && worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone })
+        worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone })
     }
     
     function refreshSummary() {
@@ -4708,49 +4851,57 @@ function playRegion(){
             switch (target) {
                 case 'species-frequency-threshold' : {
                     if (isNaN(element.value) || element.value === '') {
-                        generateToast({type: 'warning',  message:'The threshold must be a number between 0.001 and 1'});
+                        generateToast({type: 'warning',  message:'badThreshold'});
                         return false
                     }
                     config.speciesThreshold = element.value;
                     worker.postMessage({ action: 'update-state', speciesThreshold: element.value });
                     updateList();
-                    break;
-                }
+                    break }
                 case 'timelineSetting': { timelineToggle(e); break }
                 case 'nocmig': { changeNocmigMode(e); break }
-                case 'iucn': { config.detect.iucn = element.checked } // no break so results are refreshed
+                case 'iucn': { 
+                    config.detect.iucn = element.checked;
+                    resetRegions(); 
+                    refreshSummary();
+                    break } 
                 case 'iucn-scope': { 
                     config.detect.iucnScope = element.value; 
                     resetRegions(); 
                     refreshSummary();
                     break }
-                case 'auto-archive': { config.archive.auto = element.checked } // no break so worker state gets updated
-                case 'library-trim': { config.archive.trim = element.checked }
+                case 'auto-archive': { config.archive.auto = element.checked;
+                    worker.postMessage({action: 'update-state', archive: config.archive});
+                    break } 
+                case 'library-trim': { config.archive.trim = element.checked; 
+                    worker.postMessage({action: 'update-state', archive: config.archive});
+                    break }
                 case 'archive-format': {
                     config.archive.format = document.getElementById('archive-format').value;
                     worker.postMessage({action: 'update-state', archive: config.archive})
-                    break;
-                }
+                    break }
                 case 'confidenceValue': case 'confidence': { handleThresholdChange(e); break }
                 case 'context' : { toggleContextAwareMode(e); break }
                 case 'attenuation': { handleAttenuationchange(e); break }
                 case 'lowShelfFrequency': { handleLowShelfchange(e); break }
                 case 'HighPassFrequency' : { handleHPchange(e); break }
                 case 'snrValue' : { handleSNRchange(e); break }
+                case 'file-timestamp': {
+                    config.fileStartMtime = element.checked; 
+                    worker.postMessage({ action: 'update-state', fileStartMtime: config.fileStartMtime })
+                    break }
                 case 'audio-notification': { config.audio.notification = element.checked; break }
                 case 'power-save-block': {
                     config.powerSaveBlocker = element.checked;
                     powerSave(config.powerSaveBlocker);
-                    break;
-                }
+                    break }
                 case 'species-week': {
                     config.useWeek = element.checked;
 
                     if (! config.useWeek) STATE.week = -1;
                     worker.postMessage({action:'update-state', useWeek: config.useWeek});
                     updateList();
-                    break;
-                }
+                    break }
                 case 'list-to-use': {
                     setListUIState(element.value)
                     config.list = element.value;
@@ -4758,74 +4909,55 @@ function playRegion(){
                     resetResults({clearSummary: true, clearPagination: true, clearResults: true});
                     // Don't call this for custom lists
                     config.list === 'custom' || updateList()
-                    break;
-                }
+                    break }
                 case 'locale': {
-                    if (PREDICTING){
-                        generateToast({message: 'It is not possible to change the language while an analysis is underway', type:'warning'})
-                        DOM.locale.value = config[config.model].locale
-                    } else{
-                        let labelFile;
-                        if (element.value === 'custom'){
-                            labelFile = config.customListFile[config.model];
-                            if (! labelFile) {
-                                generateToast({type: 'warning', message: 'You must select a label file in the list settings to use the custom language option.'});
-                                return;
-                            }
-                        } else {
-                            const chirpity = element.value === 'en_uk' && config.model !== 'birdnet' ? 'chirpity' : '';
-                            labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_${chirpity}Labels_${element.value}.txt`; 
+                    let labelFile;
+                    if (element.value === 'custom'){
+                        labelFile = config.customListFile[config.model];
+                        if (! labelFile) {
+                            generateToast({type: 'warning', message: 'labelFileNeeded'});
+                            return;
                         }
+                    } else {
+                        const chirpity = element.value === 'en_uk' && config.model !== 'birdnet' ? 'chirpity' : '';
+                        labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_${chirpity}Labels_${element.value}.txt`; 
+                        localiseUI(DOM.locale.value).then(result => STATE.i18n = result);
                         config[config.model].locale = element.value;
-                        readLabels(labelFile, 'locale');
+                        initialiseDatePicker()
                     }
-                    break;
-                }
+                    config[config.model].locale = element.value;
+                    STATE.picker.options.lang = element.value.replace('_uk', '');
+                    readLabels(labelFile, 'locale');
+                    break }
                 case 'local': {
                     config.local = element.checked;
                     worker.postMessage({action: 'update-state', local: config.local })
                     updateList()
-                    break;
-                }
+                    break }
                 case 'model-to-use': {
                     config.model = element.value;
                     modelSettingsDisplay();
                     DOM.customListFile.value = config.customListFile[config.model];
-                    DOM.customListFile.value ? LIST_MAP.custom = 'Using a custom list' : delete LIST_MAP.custom;
+                    DOM.customListFile.value ? LIST_MAP = getI18n(i18nLIST_MAP) : delete LIST_MAP.custom;
                     document.getElementById('locale').value = config[config.model].locale;
                     //config[config.model].backend = config.hasNode ? 'tensorflow' : 'webgpu';
                     document.getElementById(config[config.model].backend).checked = true;
                     handleBackendChange(config[config.model].backend);
                     setListUIState(config.list)
-                    break;
-                }
-                case 'thread-slider': {
-                    if (PREDICTING){
-                        generateToast({message: 'It is not possible to change the number of threads while an analysis is underway', type:'warning'})
-                        DOM.threadSlider.value = config[config[config.model].backend].threads
-                    } else {
-                        // change number of threads
-                        DOM.numberOfThreads.textContent = DOM.threadSlider.value;
-                        config[config[config.model].backend].threads = DOM.threadSlider.valueAsNumber;
-                        worker.postMessage({action: 'change-threads', threads: DOM.threadSlider.valueAsNumber})
-                    }
-                    break;
-                }
+                    break }
+            case 'thread-slider': {
+                    // change number of threads
+                    DOM.numberOfThreads.textContent = DOM.threadSlider.value;
+                    config[config[config.model].backend].threads = DOM.threadSlider.valueAsNumber;
+                    worker.postMessage({action: 'change-threads', threads: DOM.threadSlider.valueAsNumber})
+                    break }
                 case 'batch-size': {
-                    if (PREDICTING){
-                        generateToast({message: 'It is not possible to change the batch size while an analysis is underway', type:'warning'})
-                        const batch = config[config[config.model].backend].batchSize;
-                        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(batch);
-                        DOM.batchSizeValue.textContent = batch;
-                    } else {
-                        DOM.batchSizeValue.textContent = BATCH_SIZE_LIST[DOM.batchSizeSlider.value].toString();
-                        config[config[config.model].backend].batchSize = BATCH_SIZE_LIST[element.value];
-                        worker.postMessage({action: 'change-batch-size', batchSize: BATCH_SIZE_LIST[element.value]})
-                        // Reset region maxLength
-                        initRegion();
-                    }
-                    break;
-                }
+                    DOM.batchSizeValue.textContent = BATCH_SIZE_LIST[DOM.batchSizeSlider.value].toString();
+                    config[config[config.model].backend].batchSize = BATCH_SIZE_LIST[element.value];
+                    worker.postMessage({action: 'change-batch-size', batchSize: BATCH_SIZE_LIST[element.value]})
+                    // Reset region maxLength
+                    initRegion();
+                    break }
                 case 'colourmap': {
                     config.colormap = element.value;
                     const colorMapFieldset = document.getElementById('colormap-fieldset')
@@ -4840,8 +4972,7 @@ function playRegion(){
                         wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
                     }
-                    break;
-                }
+                    break }
                 case 'window-function': case 'loud-color': case 'mid-color': case 'quiet-color': case 'color-threshold-slider': {
                     const windowFn = document.getElementById('window-function').value;
                     const loud = document.getElementById('loud-color').value;
@@ -4856,17 +4987,17 @@ function playRegion(){
                         wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
                     }
-                    break;
-                }
+                    break }
                 case 'gain': {
                     DOM.gainAdjustment.textContent = element.value + 'dB'; //.toString();
+                    element.blur();
                     config.audio.gain = element.value;
                     worker.postMessage({action:'update-state', audio: config.audio})
                     const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+                    config.filters.active || toggleFilters();
                     fileLoaded &&
                         postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    break;
-                }
+                    break }
                 case 'spec-labels': {
                     config.specLabels = element.checked;                    
                     if (wavesurfer && STATE.currentFile) {
@@ -4875,8 +5006,7 @@ function playRegion(){
                         wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
                     }
-                    break;
-                }
+                    break }
                 case 'fromInput': case 'fromSlider': {
                     config.audio.minFrequency = Math.max(element.valueAsNumber, 0);
                     DOM.fromInput.value = config.audio.minFrequency;
@@ -4887,8 +5017,7 @@ function playRegion(){
                     adjustSpecDims(true, fftSamples);
                     checkFilteredFrequency();
                     worker.postMessage({action: 'update-state', audio: config.audio});
-                    break;
-                }
+                    break }
                 case 'toInput': case 'toSlider': {
                     config.audio.maxFrequency = Math.min(element.valueAsNumber, 11950);
                     DOM.toInput.value = config.audio.maxFrequency;
@@ -4899,59 +5028,51 @@ function playRegion(){
                     adjustSpecDims(true, fftSamples);
                     checkFilteredFrequency();
                     worker.postMessage({action: 'update-state', audio: config.audio});
-                    break;
-                }
+                    break }
                 case 'normalise': {
                     config.audio.normalise = element.checked;
                     worker.postMessage({action:'update-state', audio: config.audio})
                     const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+                    element.blur();
                     fileLoaded &&
                         postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
-                    break;
-                }
+                    break }
                 case 'send-filtered-audio-to-model': {
                     config.filters.sendToModel = element.checked;
                     worker.postMessage({ action: 'update-state', filters: config.filters })
-                    break;
-                }
+                    break }
 
                 case 'format': {
                     config.audio.format = element.value;
                     showRelevantAudioQuality();
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
                 
                 case 'bitrate': {
                     config.audio.bitrate = e.target.value;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
                 
                 case 'quality': {
                     config.audio.quality = element.value;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
                 
                 case 'fade': {
                     config.audio.fade = element.checked;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
                 
                 case 'padding': {
                     config.audio.padding = e.target.checked;
                     DOM.audioFade.disabled = !DOM.audioPadding.checked;;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
                 
                 case 'downmix': {
                     config.audio.downmix = e.target.checked;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
-                    break;
-                };
+                    break };
             }
             updatePrefs('config.json', config)
             const value = element.type === "checkbox" ? element.checked : element.value;
@@ -4970,7 +5091,7 @@ function setListUIState(list){
     } else if (list === 'custom') {
         DOM.customListContainer.classList.remove('d-none');  
         if (!config.customListFile[config.model]) {
-            generateToast({type: 'warning', message: 'You need to upload a custom list for the model before using the custom list option.'})
+            generateToast({type: 'warning', message: 'listFileNeeded'})
             return
         }
         readLabels(config.customListFile[config.model], 'list');
@@ -4983,7 +5104,7 @@ async function readLabels(labelFile, updating){
         return response.text();
     }).catch(error =>{
         if (error.message === 'Failed to fetch') {
-            generateToast({type: 'error', message: 'The custom list could not be found, <b class="text-danger">no detections will be shown</b>.'})
+            generateToast({type: 'error', message: 'listNotFound', variables: {file: labelFile}})
             DOM.customListSelector.classList.add('btn-outline-danger');
             document.getElementById('navbarSettings').click();
             document.getElementById('list-file-selector').focus();
@@ -5008,8 +5129,13 @@ async function readLabels(labelFile, updating){
     })
 }
 
+function getI18n(context){
+    const locale = config[config.model].locale.replace(/_.*$/, '');
+    return context[locale] || context['en'];
+}
     
     async function createContextMenu(e) {
+        const i18n = getI18n(i18nContext);
         const target = e.target;
         if (target.classList.contains('circle') || target.closest('thead')) return;
         let hideInSummary = '', hideInSelection = '',
@@ -5033,44 +5159,40 @@ async function readLabels(labelFile, updating){
             }
         }
         if (region === undefined && ! inSummary) return;
-        const createOrEdit = ((region?.attributes.label || target.closest('#summary'))) ? 'Edit' : 'Create';
+        const createOrEdit = ((region?.attributes.label || target.closest('#summary'))) ? i18n.edit : i18n.create;
         
         contextMenu.innerHTML = `
-        <a class="dropdown-item play ${hideInSummary}"><span class='material-symbols-outlined'>play_circle</span> Play</a>
-        <a class="dropdown-item ${hideInSummary} ${hideInSelection}" href="#" id="context-analyse-selection">
-        <span class="material-symbols-outlined">search</span> Analyse
-        </a>
-        <div class="dropdown-divider ${hideInSummary}"></div>
-        <a class="dropdown-item" id="create-manual-record" href="#">
-        <span class="material-symbols-outlined">edit_document</span> ${createOrEdit} Record${plural}
-        </a>
-        <a class="dropdown-item" id="context-create-clip" href="#">
-        <span class="material-symbols-outlined">music_note</span> Export Audio Clip${plural}
-        </a>
-        <span class="dropdown-item" id="context-xc" href='#' target="xc">
-        <img src='img/logo/XC.png' alt='' style="filter:grayscale(100%);height: 1.5em"> Compare with Reference Calls
-        </span>
-        <div class="dropdown-divider ${hideInSelection}"></div>
-        <a class="dropdown-item ${hideInSelection}" id="context-delete" href="#">
-        <span class='delete material-symbols-outlined'>delete_forever</span> Delete Record${plural}
-        </a>
+        <div id="${inSummary ? 'inSummary' : 'inResults'}">
+            <a class="dropdown-item ${hideInSummary}" id="play-region"><span class='material-symbols-outlined'>play_circle</span> ${i18n.play}</a>
+            <a class="dropdown-item ${hideInSummary} ${hideInSelection}" href="#" id="context-analyse-selection">
+            <span class="material-symbols-outlined">search</span> ${i18n.analyse}
+            </a>
+            <div class="dropdown-divider ${hideInSummary}"></div>
+            <a class="dropdown-item" id="create-manual-record" href="#">
+            <span class="material-symbols-outlined">edit_document</span> ${createOrEdit} ${i18n.record}
+            </a>
+            <a class="dropdown-item" id="context-create-clip" href="#">
+            <span class="material-symbols-outlined">music_note</span> ${i18n.export}
+            </a>
+            <span class="dropdown-item" id="context-xc" href='#' target="xc">
+            <img src='img/logo/XC.png' alt='' style="filter:grayscale(100%);height: 1.5em"> ${i18n.compare}
+            </span>
+            <div class="dropdown-divider ${hideInSelection}"></div>
+            <a class="dropdown-item ${hideInSelection}" id="context-delete" href="#">
+            <span class='delete material-symbols-outlined'>delete_forever</span> ${i18n.delete}
+            </a>
+        </div>
         `;
         const modalTitle = document.getElementById('record-entry-modal-label');
         const contextDelete = document.getElementById('context-delete');
-        modalTitle.textContent = `${createOrEdit} Record`;
+        modalTitle.textContent = `${createOrEdit}`;
         if (!hideInSelection) {
-            const contextAnalyseSelectionLink = document.getElementById('context-analyse-selection');
-            contextAnalyseSelectionLink.addEventListener('click', getSelectionResults);
-            
             resultContext ? contextDelete.addEventListener('click', deleteRecord) :
             contextDelete.addEventListener('click', function () {
                 deleteSpecies(target);
             });
         }
         // Add event Handlers
-        const exportLink = document.getElementById('context-create-clip');
-        hideInSummary ? exportLink.addEventListener('click', batchExportAudio) :
-        exportLink.addEventListener('click', exportAudio);
         if (!hideInSelection) {
             document.getElementById('create-manual-record').addEventListener('click', function (e) {
                 if (e.target.textContent.includes('Edit')) {
@@ -5129,7 +5251,7 @@ async function readLabels(labelFile, updating){
         if (cname && activeRow) {
             // Populate the form with existing values
             commentText = activeRow.querySelector('.comment > span')?.title || '';
-            callCount = activeRow.querySelector('.call-count').textContent.replace('Present', '');
+            callCount = parseInt(activeRow.querySelector('.call-count').textContent)
             typeIndex = ['Local', 'Nocmig', ''].indexOf(activeRow.querySelector('.label').textContent);
         }
         const recordEntryBirdList = recordEntryForm.querySelector('#record-entry-birdlist');
@@ -5147,7 +5269,7 @@ async function readLabels(labelFile, updating){
         recordEntryForm.querySelector('#DBmode').value = mode;
         recordEntryForm.querySelector('#batch-mode').value = batch;
         recordEntryForm.querySelector('#original-id').value = cname;
-        recordEntryForm.querySelector('#record-add').textContent = mode;
+        //recordEntryForm.querySelector('#record-add').textContent = mode;
         if (typeIndex) recordEntryForm.querySelectorAll('input[name="record-label"]')[typeIndex].checked = true;
         recordEntryModalDiv.addEventListener('shown.bs.modal', focusBirdList)
         toggleKeyDownForFormInputs()
@@ -5239,7 +5361,20 @@ async function readLabels(labelFile, updating){
             file = STATE.currentFile;
         }
         if (file) {
-            if (confirm(`This will remove ${file} and all the associated detections from the database archive. Proceed?`)) {
+            const i18nPurge = {
+                en: `This will remove ${file} and all the associated detections from the database archive. Proceed?`,
+                da: `Dette vil fjerne ${file} og alle tilknyttede registreringer fra databasearkivet. Fortsæt?`,
+                de: `Dadurch werden ${file} und alle zugehörigen Erkennungen aus dem Datenbankarchiv entfernt. Fortfahren?`,
+                es: `Esto eliminará ${file} y todas las detecciones asociadas del archivo de la base de datos. ¿Continuar?`,
+                fr: `Cela supprimera ${file} et toutes les détections associées de l'archive de la base de données. Continuer ?`,
+                nl: `Dit verwijdert ${file} en alle bijbehorende detecties uit het databasearchief. Doorgaan?`,
+                pt: `Isso removerá ${file} e todas as detecções associadas do arquivo do banco de dados. Prosseguir?`,
+                ru: `Это удалит ${file} и все связанные обнаружения из архива базы данных. Продолжить?`,
+                sv: `Detta kommer att ta bort ${file} och alla tillhörande detektioner från databasarvet. Fortsätt?`,
+                zh: `这将删除 ${file} 及其所有相关检测记录从数据库存档中。继续吗？`
+            }
+            const message = getI18n(i18nPurge)
+            if (confirm(message)) {
                 worker.postMessage({
                     action: 'purge-file',
                     fileName: file
@@ -5393,9 +5528,9 @@ async function readLabels(labelFile, updating){
                         ].join('')
                         alertPlaceholder.append(wrapper)
                     }
-                    alert(`
-                    <svg class="bi flex-shrink-0 me-2" width="20" height="20" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
-                    There's a new version of Chirpity available! <a href="https://chirpity.mattkirkland.co.uk?fromVersion=${VERSION}" target="_blank">Check the website</a> for more information`,
+                    const link = `<a href="https://chirpity.mattkirkland.co.uk?fromVersion=${VERSION}" target="_blank">`;
+                    const message = interpolate(getI18n(i18nUpdateMessage), {link: link})
+                    alert(`<svg class="bi flex-shrink-0 me-2" width="20" height="20" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>${message}`,
                     'warning');
                     trackEvent(config.UUID, 'Update message', `From ${VERSION}`, `To: ${latestVersion}`);
                 }
@@ -5407,9 +5542,25 @@ async function readLabels(labelFile, updating){
             });
         }
     }
+    const i18nUpdateMessage = {
+        en: 'There\'s a new version of Chirpity available! ${link}Check the website</a> for more information',
+        da: 'Der er en ny version af Chirpity tilgængelig! ${link}Besøg hjemmesiden</a> for mere information',
+        de: 'Eine neue Version von Chirpity ist verfügbar! ${link}Besuchen Sie die Website</a> für weitere Informationen',
+        es: '¡Hay una nueva versión de Chirpity disponible! ${link}Visita el sitio web</a> para más información',
+        fr: 'Une nouvelle version de Chirpity est disponible ! ${link}Consultez le site web</a> pour plus d\'informations',
+        nl: 'Er is een nieuwe versie van Chirpity beschikbaar! ${link}Bezoek de website</a> voor meer informatie',
+        pt: 'Há uma nova versão do Chirpity disponível! ${link}Visite o site</a> para mais informações',
+        ru: 'Доступна новая версия Chirpity! ${link}Посетите сайт</a> для получения дополнительной информации',
+        sv: 'En ny version av Chirpity är tillgänglig! ${link}Besök webbplatsen</a> för mer information',
+        zh: 'Chirpity有新版本可用！${link}访问网站</a>了解更多信息'
+    };
+    
     
 
-    function generateToast({message = '', type = 'info', autohide = true} ={}) {
+    function generateToast({message = '', type = 'info', autohide = true, variables = undefined} ={}) {
+        // i18n
+        const i18n = getI18n(i18nToasts);
+        message = variables ? interpolate(i18n[message], variables) : i18n[message] || message;
         const domEl = document.getElementById('toastContainer');
         
         const wrapper = document.createElement('div');
@@ -5427,7 +5578,7 @@ async function readLabels(labelFile, updating){
         iconSpan.classList.add('material-symbols-outlined', 'pe-2');
         iconSpan.textContent = type; // The icon name
         const typeColours = { info: 'text-primary', warning: 'text-warning', error: 'text-danger'};
-        const typeText = { info: 'Notice', warning: 'Warning', error: 'Error'};
+        const typeText = { info: i18n.info, warning: i18n.warning, error: i18n.error};
         iconSpan.classList.add(typeColours[type]);
         const strong = document.createElement('strong');
         strong.className = 'me-auto';
@@ -5435,7 +5586,7 @@ async function readLabels(labelFile, updating){
 
         const small = document.createElement('small');
         small.className = 'text-muted';
-        small.textContent = 'just now';
+        small.textContent = ''; //just now';
 
         const button = document.createElement('button');
         button.type = 'button';
@@ -5462,7 +5613,7 @@ async function readLabels(labelFile, updating){
         domEl.appendChild(wrapper)
         const toast = new bootstrap.Toast(wrapper, {autohide: autohide})
         toast.show()
-        if (message === 'Analysis complete.'){
+        if (message === i18n.complete){
             const duration = parseFloat(DIAGNOSTICS['Analysis Duration'].replace(' seconds', ''));
             if (config.audio.notification && duration > 30){
                 if (Notification.permission === "granted") {
@@ -5518,7 +5669,7 @@ async function readLabels(labelFile, updating){
         return false;
     }
 
-    // Not Harlem, but Fisher-Yates shuffle
+    // Not Harlem, but Fisher-Yates shuffle - used for xc call selection
     function shuffle(array) {
         for (let i = array.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -5542,21 +5693,21 @@ async function getXCComparisons(){
     if (XCcache[sname]) renderComparisons(XCcache[sname], cname);
     else {
 
-        DOM.loading.querySelector('#loadingText').textContent = 'Loading Xeno-Canto data...';
+        DOM.loading.querySelector('#loadingText').textContent = 'Loading Xeno-Canto data...'; 
         DOM.loading.classList.remove('d-none');
         const quality = '+q:%22>C%22';
         const length = '+len:3-15';
         fetch(`https://xeno-canto.org/api/2/recordings?query=${sname}${quality}${length}`)
         .then(response =>{
             if (! response.ok) {
-                loading.classList.add('d-none');
-                return generateToast({type: 'error', message: 'The Xeno-canto API is not responding'})
+                DOM.loading.classList.add('d-none');
+                return generateToast({type: 'error', message: 'noXC'})
             }
             return response.json()
         })
         .then(data => {
             // Hide loading
-            loading.classList.add('d-none');
+            DOM.loading.classList.add('d-none');
             // Extract the first 10 items from the recordings array
             const recordings = data.recordings.map(record => ({
                 file: record.file, // media file
@@ -5565,7 +5716,7 @@ async function getXCComparisons(){
                 type: record.type, // call type
                 smp: record.smp, // sample rate
                 licence: record.lic //// licence
-              }));
+              })).filter(record => record.file); // Remove records with empty file URL;
 
             // Shuffle recordings so new cache returns a different set
             shuffle(recordings);
@@ -5601,7 +5752,7 @@ async function getXCComparisons(){
               }
             });
             if (songCount === 0 && callCount === 0 && flightCallCount === 0 && nocturnalFlightCallCount === 0) {
-                generateToast({type: 'warning', message: 'The Xeno-canto site has no comparisons available'})
+                generateToast({type: 'warning', message: 'noComparisons'})
                 return
               } else {
                 // Let's cache the result, 'cos the XC API is quite slow
@@ -5612,7 +5763,7 @@ async function getXCComparisons(){
               }
         })
         .catch(error => {
-            loading.classList.add('d-none');
+            DOM.loading.classList.add('d-none');
             console.warn('Error getting XC data', error)
         })
     }
@@ -5624,6 +5775,8 @@ function capitalizeEachWord(str) {
     });
   }
 function renderComparisons(lists, cname){
+    const i18n = getI18n(i18nContext);
+    const i18nTitle = getI18n(i18nTitles);
     cname = cname.replace(/\(.*\)/, '').replace('?', '');
     const compareDiv = document.createElement('div');
     compareDiv.classList.add('modal', 'modal-fade', 'model-lg')
@@ -5640,18 +5793,18 @@ function renderComparisons(lists, cname){
                         <ul class="nav nav-tabs navbar navbar-expand p-0 pt-1" id="callTypeHeader" role="tablist"></ul>
                         <div class="tab-content" id="recordings"></div>
                         <div class="modal-footer justify-content-center pb-0">
-                            <button id="playComparison" class="p-1 pe-2 btn btn-outline-secondary" title="Play / Pause (SpaceBar)">
+                            <button id="playComparison" class="p-1 pe-2 btn btn-outline-secondary" title="${i18nTitle.playToggle}">
                                 <span class="material-symbols-outlined ">play_circle</span><span
-                                class="align-middle d-none d-lg-inline"> Play </span>
+                                class="align-middle d-none d-lg-inline"> ${i18n.play} </span>
                                 /
                                 <span class="material-symbols-outlined">pause</span><span
-                                class="align-middle d-none d-lg-inline-block">Pause</span>
+                                class="align-middle d-none d-lg-inline-block">${i18n.pause}</span>
                             </button>
                             <div class="btn-group" role="group">
-                                <button id="cmpZoomIn" title="Zoom into the spectrogram" class="btn btn-outline-secondary p-0">
+                                <button id="cmpZoomIn" title="${i18nTitle.zoomIn}" class="btn btn-outline-secondary p-0">
                                 <span class="material-symbols-outlined zoom-xc">zoom_in</span>
                                 </button>
-                                <button id="cmpZoomOut" title="Zoom out of the spectrogram" class="btn btn-outline-secondary p-0"
+                                <button id="cmpZoomOut" title="${i18nTitle.zoomOut}" class="btn btn-outline-secondary p-0"
                                 style="max-width: 70px"><span class="material-symbols-outlined zoom-xc align-middle">zoom_out</span>
                                 </button>
                             </div>
@@ -5669,12 +5822,12 @@ function renderComparisons(lists, cname){
     Object.keys(lists).forEach(callType =>{
         const active = count === 0 ? 'active' : '';
         const callTypePrefix = callType.replaceAll(' ','-');
-        if (lists[callType].length){
+        if (lists[callType]?.length){
             // tab headings
             const tabHeading = document.createElement('li');
             tabHeading.classList.add('nav-item')
             tabHeading.setAttribute('role', 'presentation');
-            const button = `<button class="nav-link text-nowrap ${active}" id="${callTypePrefix}-tab" data-bs-toggle="tab" data-bs-target="#${callTypePrefix}-tab-pane" type="button" role="tab" aria-controls="${callTypePrefix}-tab-pane" aria-selected="${count === 0}">${capitalizeEachWord(callType)}</button>`;
+            const button = `<button class="nav-link text-nowrap ${active}" id="${callTypePrefix}-tab" data-bs-toggle="tab" data-bs-target="#${callTypePrefix}-tab-pane" type="button" role="tab" aria-controls="${callTypePrefix}-tab-pane" aria-selected="${count === 0}">${i18n[callType]}</button>`;
             tabHeading.innerHTML = button;
             callTypeHeader.appendChild(tabHeading);
 
@@ -5755,7 +5908,6 @@ function renderComparisons(lists, cname){
     document.body.appendChild(compareDiv)
     const header = compareDiv.querySelector('.modal-header');
     makeDraggable(header);
-    const navTabs = document.getElementById('callTypeHeader');
     callTypeHeader.addEventListener('click', showCompareSpec)
     const comparisonModal = new bootstrap.Modal(compareDiv);
     compareDiv.addEventListener('hidden.bs.modal', () => compareDiv.remove())
@@ -5895,7 +6047,7 @@ async function getIUCNStatus(sname = 'Anser anser') {
 
     } catch (error) {
         if (error.message.includes('404')) {
-            generateToast({message: `There is no record of <b>${sname}</b> on the IUCN Red List.`, type: 'warning'})
+            generateToast({message:  'noIUCNRecord', variables: {sname: sname}, type: 'warning'})
             STATE.IUCNcache[sname] = {scopes: [{scope: 'Global', status: 'NA', url: null}]}
             updatePrefs('IUCNcache.json', STATE.IUCNcache);
             return true
@@ -5911,20 +6063,10 @@ const IUCNMap = {
     'VU': 'text-bg-warning',
     'NT': 'text-bg-warning',
     'EN': 'text-bg-danger',
-    'CR': 'text-bg-dnager',
+    'CR': 'text-bg-danger',
     'EW': 'text-bg-dark',
     'EX': 'text-bg-dark'
 }
-const IUCNLabel = {
-    'NA': 'No Data',
-    'DD': 'Data Deficient',
-    'LC': 'Least Consern',
-    'VU': 'Vulnerable',
-    'NT': 'Near Threatened',
-    'EN': 'Endangered',
-    'CR': 'Critically Endangered',
-    'EW': 'Extinct in the Wild',
-    'EX': 'Extinct'
-}
+
 // Make config, LOCATIONS and displayLocationAddress and toasts available to the map script in index.html
 export { config, displayLocationAddress, LOCATIONS, generateToast };
