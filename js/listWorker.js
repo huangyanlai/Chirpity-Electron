@@ -372,8 +372,6 @@ function findAllIndexes(array, value) {
 }
 const getFirstElement = label => label.split('_')[0];
 async function _init_(){
-    DEBUG && console.log("load loading metadata_model");
-    // const appPath = "../" + location + "/";
     DEBUG && console.log(`List generating model received load instruction.`);
     tf.setBackend(BACKEND).then(async () => {
         tf.enableProdMode();
