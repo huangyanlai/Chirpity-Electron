@@ -54,9 +54,9 @@ function loadModel(params){
         myModel.width = width;
 
         // Create a mask tensor where the specified indexes are set to 0 and others to 1
-        const indexesToZero = [25, 30, 110, 319, 378, 403, 404, 405, 406];
+        // const indexesToZero = [25, 30, 110, 319, 378, 403, 404, 405, 406];
 
-        myModel.mask = tf.tensor2d(Array.from({ length: 408 }, (_, i) => indexesToZero.includes(i) ? 0 : 1), [1, 408]);
+        // myModel.mask = tf.tensor2d(Array.from({ length: 408 }, (_, i) => indexesToZero.includes(i) ? 0 : 1), [1, 408]);
         myModel.labels = labels;
         await myModel.loadModel();
         myModel.warmUp(batch);
@@ -113,19 +113,15 @@ onmessage = async (e) => {
                 const spec_height = e.data.height;
                 const spec_width = e.data.width;
                 let image;
-                const signal = tf.tensor1d(buffer, "float32");
-                const bufferTensor = myModel.normalise_audio(signal);
-                signal.dispose();
-                const imageTensor = tf.tidy(() => {
-                    return myModel.makeSpectrogram(bufferTensor);
-                });
                 image = tf.tidy(() => {
+                    const signal = tf.tensor1d(buffer, "float32");
+                    const bufferTensor = myModel.normalise_audio(signal);
+                    const imageTensor = tf.tidy(() => {
+                        return myModel.makeSpectrogram(bufferTensor);
+                    });
                     let spec = myModel.fixUpSpecBatch(tf.expandDims(imageTensor, 0), spec_height, spec_width);
-                    const spec_max = tf.max(spec);
-                    return spec.mul(255).div(spec_max).dataSync();
+                    return spec.dataSync();
                 });
-                bufferTensor.dispose();
-                imageTensor.dispose();
                 response = {
                     message: "spectrogram",
                     width: myModel.inputShape[2],
@@ -338,9 +334,9 @@ class Model {
         if (paddedTensorBatch) paddedTensorBatch.dispose();
         if (maskedTensorBatch) maskedTensorBatch.dispose();
 
-        const finalRawPrediction = newPrediction || prediction;
-        const finalPrediction = finalRawPrediction.mul(this.mask);
-        finalRawPrediction.dispose();
+        const finalPrediction = newPrediction || prediction;
+        // const finalPrediction = finalRawPrediction.mul(this.mask);
+        // finalRawPrediction.dispose();
         const { indices, values } = tf.topk(finalPrediction, 5, true)
             
         const [topIndices, topValues] = await Promise.all([indices.array(), values.array()]).catch(err => console.log('Data transfer error:',err));
@@ -368,13 +364,26 @@ class Model {
             */
             //specBatch = tf.log1p(specBatch).mul(20);
             // Swap axes to fit output shape
+            
             specBatch = tf.transpose(specBatch, [0, 2, 1]);
             specBatch = tf.reverse(specBatch, [1]);
             // Add channel axis
-            specBatch = tf.expandDims(specBatch, -1);
+
             //specBatch = tf.slice4d(specBatch, [0, 1, 0, 0], [-1, img_height, img_width, -1]);
-            specBatch = tf.image.resizeBilinear(specBatch, [img_height, img_width], true);
-            return  this.normalise(specBatch)
+            //specBatch = tf.image.resizeBilinear(specBatch, [img_height, img_width], true);
+            // Slice to exclude the bottom 10 rows
+            const sliced_tensor = tf.slice3d(specBatch, [0, 1, 0], [-1, img_height - 10, img_width])
+
+            // Slice the bottom 10 rows
+            const bottomRows = tf.slice3d(sliced_tensor, [0, img_height - 20, 0], [-1, 10, img_width]);
+
+            // Reduce the values of the bottom rows
+            const attenuatedRows = bottomRows.div(tf.scalar(5));
+
+            // Concatenate the sliced tensor with the bottom rows
+            specBatch = tf.concat([sliced_tensor, attenuatedRows], 1)
+            specBatch = this.normalise(specBatch)
+            return  tf.expandDims(specBatch, -1);
         })
     }
     normalise_audio_batch = (tensor) => {
@@ -418,11 +427,8 @@ class Model {
         audioBuffer.dispose();
         const bufferList = this.version !== 'v4' ? this.normalise_audio_batch(buffers) : buffers;
         const specBatch = tf.tidy(() => {
-            const bufferArray = tf.unstack(bufferList);
-            const toStack = bufferArray.map(x => {
-                return this.makeSpectrogram(x)
-            })
-            return this.fixUpSpecBatch(tf.stack(toStack))
+            const toStack = tf.unstack(bufferList).map(x => this.makeSpectrogram(x));
+            return this.fixUpSpecBatch(tf.stack(toStack));
         });
         buffers.dispose();
         bufferList.dispose();
