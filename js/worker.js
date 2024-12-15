@@ -15,7 +15,7 @@ import {trackEvent} from './tracking.js';
 import {extractWaveMetadata} from './metadata.js';
 let isWin32 = false;
 
-const DATASET = true;
+const DATASET = false;
 const DATABASE = 'archive_test'
 const adding_chirpity_additions = false;
 const DATASET_SAVE_LOCATION = "/media/matt/36A5CC3B5FA24585/DATASETS/ATTENUATED_pngs/call";
@@ -262,7 +262,7 @@ async function loadDB(path) {
     // Add Unknown Sp.
     modelLabels.push("Unknown Sp._Unknown Sp.");
     LABELS = modelLabels; // these are the default english labels
-    const file = dataset_database ? p.join(path, `archive_dataset.sqlite`) : p.join(path, `archive.sqlite`)
+    const file = DATASET ? p.join(path, `archive_dataset.sqlite`) : p.join(path, `archive.sqlite`)
 
     if (!fs.existsSync(file)) {
         await createDB(file);
