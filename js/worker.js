@@ -18,7 +18,7 @@ let isWin32 = false;
 const DATASET = false;
 const DATABASE = 'archive_test'
 const adding_chirpity_additions = false;
-const DATASET_SAVE_LOCATION = "/media/matt/36A5CC3B5FA24585/DATASETS/ATTENUATED_pngs/call";
+const DATASET_SAVE_LOCATION = "/media/matt/36A5CC3B5FA24585/DATASETS/ATTENUATED_pngs/dog";
 let ntsuspend;
 if (process.platform === 'win32') {
     ntsuspend = require('ntsuspend');
@@ -218,6 +218,15 @@ const createDB = async (file) => {
             const [common, callType] = parseCname(cname);
             await db.runAsync('INSERT INTO species VALUES (?,?,?, ?)', i, sname, common, callType);
         }
+        await db.runAsync(`
+            CREATE TABLE IF NOT EXISTS db_upgrade (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+        `);
+        await db.runAsync(`
+            INSERT INTO db_upgrade (key, value) VALUES ('last_update', 'add_columns_archiveName_and_metadata_and_foreign_key_to_files')
+        `);
     } else {
         const filename = diskDB.filename;
         let { code } = await db.runAsync('ATTACH ? as disk', filename);
@@ -359,7 +368,7 @@ async function checkAndApplyUpdates(db) {
 
     // Apply updates that come after the last update applied
     let updateIndex = DB_updates.findIndex(m => m.name === lastUpdate.value);
-    
+    trackEvent(STATE.UUID, 'DB', 'UPDATE', updateIndex);
     // Start from the next Update
     updateIndex = updateIndex >= 0 ? updateIndex + 1 : 0;
 
@@ -816,14 +825,15 @@ const prepSummaryStatement = (included) => {
     FROM ranked_records
     WHERE ranked_records.rank <= ${STATE.topRankin}`;
     
-    summaryStatement +=  ` GROUP BY speciesID  ORDER BY cname`;
+    summaryStatement +=  ` GROUP BY speciesID  ORDER BY ${STATE.summarySortOrder}`;
 
     return [summaryStatement, params]
 }
     
 
-const getTotal = async ({species = undefined, offset = undefined, included = STATE.included, file = undefined}= {}) => {
+const getTotal = async ({species = undefined, offset = undefined, included = undefined, file = undefined}= {}) => {
     let params = [];
+    included ??= await getIncludedIDs(file);
     const range = STATE.mode === 'explore' ? STATE.explore.range : undefined;
     offset = offset ?? (species !== undefined ? STATE.filteredOffset[species] : STATE.globalOffset);
     let SQL = ` WITH MaxConfidencePerDateTime AS (
@@ -833,12 +843,9 @@ const getTotal = async ({species = undefined, offset = undefined, included = STA
         FROM records 
         JOIN files ON records.fileID = files.id 
         WHERE confidence >= ${STATE.detect.confidence} `;
-    if (file) {
-        params.push(file)
-        SQL += ' AND files.name = ? '
-    }
-    else if (filtersApplied(included)) SQL += ` AND speciesID IN (${included}) `;
-    if (STATE.detect.nocmig) SQL += ' AND COALESCE(isDaylight, 0) != 1 ';
+
+    if (filtersApplied(included)) SQL += ` AND speciesID IN (${included}) `;
+    if (STATE.detect.nocmig) SQL += ' AND NOT isDaylight';
     if (STATE.locationID) SQL += ` AND locationID =  ${STATE.locationID}`;
     const [SQLtext, fileParams] = getFileSQLAndParams(range);
     SQL += SQLtext, params.push(...fileParams);
@@ -940,7 +947,7 @@ const prepResultsStatement = (species, noLimit, included, offset, topRankin) => 
     const limitClause = noLimit ? '' : 'LIMIT ?  OFFSET ?';
     noLimit || params.push(STATE.limit, offset);
 
-    resultStatement += ` ORDER BY ${STATE.sortOrder}, callCount DESC ${limitClause} `;
+    resultStatement += ` ORDER BY ${STATE.resultsSortOrder}, callCount DESC ${limitClause} `;
     
     return [resultStatement, params];
 }
@@ -1392,7 +1399,7 @@ const getPredictBuffers = async ({
 }
 
 async function processAudio (file, start, end, chunkStart, highWaterMark, samplesInBatch){
-    const MAX_CHUNKS = NUM_WORKERS * 2;
+    const MAX_CHUNKS = Math.max(12, NUM_WORKERS * 4);
     let isPaused = false;
     return new Promise((resolve, reject) => {
         // Many compressed files start with a small section of silence due to encoder padding, which affects predictions
@@ -1427,13 +1434,13 @@ async function processAudio (file, start, end, chunkStart, highWaterMark, sample
                 console.log('about to set the interval ', pid)
                 const interval = setInterval(() =>{
                     console.log('Backlog', AUDIO_BACKLOG)
-                    if (AUDIO_BACKLOG < NUM_WORKERS){
+                    if (AUDIO_BACKLOG < NUM_WORKERS * 2){
                         resumeFfmpeg(command, pid)
                         console.log('resumed ', pid)
                         isPaused = false;
                         clearInterval(interval)
                     }
-                }, 100)
+                }, 10)
             }
             if (aborted) {
                 STREAM.destroy();
@@ -2261,9 +2268,10 @@ const parsePredictions = async (response) => {
                 }
             }
         } 
-    } else if (index === 500){
+    } else if (index > 500){
         // Slow down the summary updates
         setGetSummaryQueryInterval(NUM_WORKERS)
+        DEBUG && console.log('Reducing summary updates to one every ', STATE.incrementor)
     }
     predictionsReceived[file]++;
     const received = sumObjectValues(predictionsReceived);
@@ -2281,7 +2289,7 @@ const parsePredictions = async (response) => {
 
     if (!STATE.selection && STATE.increment() === 0) {
         getSummary({ interim: true });
-        getTotal()
+        getTotal({file})
     }
 
     return response.worker
@@ -3524,12 +3532,8 @@ async function sendKnownLocationsToUI({ db = STATE.db, file }) {
  * @param {*} file 
  * @returns a list of IDs included in filtered results
  */
-async function getIncludedIDs(file, fromArchive){
-    t0 = Date.now();
-    let lat, lon, week, hitOrMiss = 'hit';
-    // Ensure the correct list is requested
-    const dbToUse = fromArchive || STATE.db.filename !== ':memory:' ? 'archive' : STATE.model;
-
+async function getIncludedIDs(file){
+    let lat, lon, week;
     if (STATE.list === 'location' || (STATE.list === 'nocturnal' && STATE.local)){
         if (file){
             file = METADATA[file];
@@ -3546,18 +3550,14 @@ async function getIncludedIDs(file, fromArchive){
         if (STATE.included?.[dbToUse]?.[STATE.list]?.[week]?.[location] === undefined ) {
             // Cache miss
             await setIncludedIDs(dbToUse, lat,lon,week)
-            hitOrMiss = 'miss';
         } 
-        DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
-        return STATE.included[dbToUse][STATE.list][week][location];
+        return STATE.included[STATE.model][STATE.list][week][location];
         
     } else {
         if (STATE.included?.[dbToUse]?.[STATE.list] === undefined) {
             // The object lacks the week / location
             LIST_WORKER && await setIncludedIDs(dbToUse);
-            hitOrMiss = 'miss';
         }
-        DEBUG && console.log(`Cache ${hitOrMiss}: setting the ${STATE.list} list took ${Date.now() -t0}ms`)
         return STATE.included[dbToUse][STATE.list];
     }
 }
