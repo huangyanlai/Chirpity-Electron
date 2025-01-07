@@ -86,7 +86,6 @@ async function fetchReleaseNotes(version) {
 
 
 if (! isMac && ! process.env.CI ){  // The auto updater doesn't work for .pkg installers or in CI mode
-    if (false){ 
     autoUpdater.on('checking-for-update', function () {
         logUpdateStatus('Checking for update...');
         if (process.env.PORTABLE_EXECUTABLE_DIR){
