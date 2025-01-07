@@ -98,6 +98,7 @@ jobs:
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Install additional dependencies
+        if: runner.os == 'Linux'
         run: sudo apt-get install -y libgtk-3-0 
       # end test application
       
