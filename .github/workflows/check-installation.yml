@@ -165,9 +165,13 @@ jobs:
       - run: echo "File check status is ${{ job.status }}."
 
       # Tests
-      - name: Test packaged application
+      - name: Test Linux  packaged application
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" -- npm run test
+      
+      - name: Test other packaged applications
+        if: runner.os != 'Linux'
         run: npm test
-        env:
-          DISPLAY: :99
+
 
 
