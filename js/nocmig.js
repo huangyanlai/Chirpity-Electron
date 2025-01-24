@@ -1,11 +1,10 @@
 let tf, BACKEND;
-try {
-    tf = require('@tensorflow/tfjs-node');
-} catch {
-    tf = require('@tensorflow/tfjs');
-    require('@tensorflow/tfjs-backend-webgpu');
-    BACKEND = 'webgpu';
-}
+tf = require('@tensorflow/tfjs-core');
+require('@tensorflow/tfjs-backend-wasm')
+const {setWasmPaths} = require('@tensorflow/tfjs-backend-wasm');
+setWasmPaths('../node_modules/@tensorflow/tfjs-backend-wasm/dist/');
+    BACKEND = 'wasm'
+
 const fs = require('node:fs');
 const path = require('node:path');
 import {BaseModel} from './BaseModel.js';
@@ -277,10 +276,8 @@ class ChirpityModel extends BaseModel {
     async predictChunk(audioBuffer, start, fileStart, file, threshold, confidence) {
         DEBUG && console.log('predictCunk begin', tf.memory().numTensors);
         const [buffers, numSamples] = this.createAudioTensorBatch(audioBuffer);
-        const specBatch =  tf.tidy(() => {
-            const toStack = tf.unstack(buffers).map(x => this.makeSpectrogram(x));
-            return this.fixUpSpecBatch(tf.stack(toStack));
-        });
+        const spectrograms = await Promise.all(tf.unstack(buffers).map(x => this.makeSpectrogram(x)));
+        const specBatch = this.fixUpSpecBatch(tf.stack(spectrograms));
         buffers.dispose();
         const batchKeys = this.getKeys(numSamples, start);
         const result = await this.predictBatch(specBatch, batchKeys, threshold, confidence);
