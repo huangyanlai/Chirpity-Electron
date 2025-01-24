@@ -1,5 +1,6 @@
 const { app, Menu, dialog, ipcMain, MessageChannelMain, BrowserWindow, powerSaveBlocker } = require('electron');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('ignore-certificate-errors');
 // WebGPU flags needed for Linux
 app.commandLine.appendSwitch('enable-unsafe-webgpu');
 app.commandLine.appendSwitch('enable-features','Vulkan');
@@ -373,7 +374,7 @@ async function createWorker() {
             },
         });
     });
-    await workerWindow.loadURL('http://localhost:3000/worker.html');
+    await workerWindow.loadURL('https://localhost:3000/worker.html');
     
     workerWindow.on('closed', () => {
         workerWindow = undefined;
@@ -390,6 +391,7 @@ async function createWorker() {
 
 // This method will be called when Electron has finished loading
 app.whenReady().then(async () => {
+
     server = require('./js/server.js');
     // Update the userData path for portable app
     if (process.env.PORTABLE_EXECUTABLE_DIR) {
