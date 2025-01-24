@@ -2,7 +2,11 @@ let tf, BACKEND;
 tf = require('@tensorflow/tfjs-core');
 require('@tensorflow/tfjs-backend-wasm')
 const {setWasmPaths} = require('@tensorflow/tfjs-backend-wasm');
-setWasmPaths('../node_modules/@tensorflow/tfjs-backend-wasm/dist/');
+setWasmPaths({
+    'tfjs-backend-wasm.wasm': '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-simd.wasm',
+    'tfjs-backend-wasm-simd.wasm': '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm',
+    'tfjs-backend-wasm-threaded-simd.wasm':'../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm'
+    });
     BACKEND = 'wasm'
 
 const fs = require('node:fs');
@@ -135,7 +139,6 @@ onmessage = async (e) => {
             }
             case "terminate": {
                 tf.backend().dispose();
-                console.log('pre termination', tf.memory());
                 self.close(); // Terminate the worker
             }
         }
@@ -275,10 +278,13 @@ class ChirpityModel extends BaseModel {
 
     async predictChunk(audioBuffer, start, fileStart, file, threshold, confidence) {
         DEBUG && console.log('predictCunk begin', tf.memory().numTensors);
+        console.log('THreads', tf.env().getFlags())
+        await tf.setBackend('tensorflow');
         const [buffers, numSamples] = this.createAudioTensorBatch(audioBuffer);
-        const spectrograms = await Promise.all(tf.unstack(buffers).map(x => this.makeSpectrogram(x)));
+        const spectrograms = tf.unstack(buffers).map(x => this.makeSpectrogram(x));
+        await tf.setBackend('wasm');
         const specBatch = this.fixUpSpecBatch(tf.stack(spectrograms));
-        buffers.dispose();
+        buffers.dispose(); spectrograms.dispose();
         const batchKeys = this.getKeys(numSamples, start);
         const result = await this.predictBatch(specBatch, batchKeys, threshold, confidence);
         return [result, file, fileStart];

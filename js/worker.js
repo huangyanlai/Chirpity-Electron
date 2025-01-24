@@ -2091,7 +2091,7 @@ function spawnPredictWorkers(model, list, batchSize, threads) {
         }
     }
 }
-
+console.log('Cross-Origin Isolation:', window.crossOriginIsolated);
 const terminateWorkers = () => {
         predictWorkers.forEach(worker => {
         worker.postMessage({message: 'terminate'})

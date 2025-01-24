@@ -291,7 +291,17 @@ async function createWindow() {
     // Hide nav bar except in ci mode
 
     mainWindow.setMenuBarVisibility(!!process.env.CI);
-
+    workerWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Access-Control-Allow-Origin': ['*'],
+                'Cross-Origin-Resource-Policy': ['cross-origin'],
+                'Cross-Origin-Embedder-Policy': ['require-corp'],
+                'Cross-Origin-Opener-Policy': ['cross-origin'],
+            },
+        });
+    });
     // and load the index.html of the app.
     mainWindow.loadFile('index.html');
     
@@ -304,6 +314,11 @@ async function createWindow() {
     // Emitted when the window is closed.
     if (process.platform !== 'darwin') {
         mainWindow.on('closed', () => {
+            if (server) {
+                server.close(() => {
+                  console.log('Express server closed.');
+                });
+              }
             app.quit()
         })
     }
@@ -346,7 +361,19 @@ async function createWorker() {
     // Track window state
     mainWindowStateKeeper.track(workerWindow);
     workerWindow.setIcon(__dirname + '/img/icon/icon.png');
-    await workerWindow.loadFile('worker.html');
+          // Add necessary headers for cross-origin isolation
+    workerWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Access-Control-Allow-Origin': ['*'],
+                'Cross-Origin-Resource-Policy': ['cross-origin'],
+                'Cross-Origin-Embedder-Policy': ['require-corp'],
+                'Cross-Origin-Opener-Policy': ['cross-origin'],
+            },
+        });
+    });
+    await workerWindow.loadURL('http://localhost:3000/worker.html');
     
     workerWindow.on('closed', () => {
         workerWindow = undefined;
@@ -357,11 +384,13 @@ async function createWorker() {
             workerWindow.webContents.openDevTools();
         }
     })
+
     DEBUG && console.log("worker created");
 }
 
 // This method will be called when Electron has finished loading
 app.whenReady().then(async () => {
+    server = require('./js/server.js');
     // Update the userData path for portable app
     if (process.env.PORTABLE_EXECUTABLE_DIR) {
         app.setPath ('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, "chirpity-data"));
@@ -375,7 +404,14 @@ app.whenReady().then(async () => {
     ipcMain.handle('getTemp', () => app.getPath('temp'));
     ipcMain.handle('isMac', () => process.platform === 'darwin');
     ipcMain.handle('getAudio', () => path.join(__dirname.replace('app.asar', ''), 'Help', 'example.mp3'));
-    ipcMain.handle('exitApplication', () => app.quit()); 
+    ipcMain.handle('exitApplication', () => {
+        if (server) {
+            server.close(() => {
+              console.log('Express server closed.');
+            });
+        }
+        app.quit()
+    }); 
     
     // Debug mode
     try {
@@ -403,6 +439,11 @@ app.whenReady().then(async () => {
         // Quit when all windows are closed.
         app.setAppUserModelId('chirpity')
         app.on('window-all-closed', () => {
+            if (server) {
+                server.close(() => {
+                  console.log('Express server closed.');
+                });
+              }
             app.quit()
         })
     }
@@ -478,7 +519,11 @@ app.whenReady().then(async () => {
         
         dialog.showMessageBox(dialogOpts).then((returnValue) => {
             if (returnValue.response === 0) {
-                //app.relaunch();
+                if (server) {
+                    server.close(() => {
+                      console.log('Express server closed.');
+                    });
+                  }
                 app.quit();
             }
         })

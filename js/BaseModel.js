@@ -104,12 +104,7 @@ class BaseModel {
     }
 
     makeSpectrogram(signal) {
-        return tf.setBackend('tensorflow')
-            .then(() => tf.abs(tf.signal.stft(signal, this.frame_length, this.frame_step)))
-            .then(spec => {
-                // Capture the spectrogram value and switch back to WASM
-                return tf.setBackend('wasm').then(() => spec);
-            });
+        return tf.tidy(() => tf.abs(tf.signal.stft(signal, this.frame_length, this.frame_step)))
     }
 
     fixUpSpecBatch(specBatch, h, w) {
