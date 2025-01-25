@@ -2059,7 +2059,7 @@ function spawnPredictWorkers(model, list, batchSize, threads) {
     // And be ready to receive the list:
     for (let i = 0; i < threads; i++) {
         const workerSrc = model === 'birdnet' ? 'BirdNet2.4' : model;
-        const worker = new Worker(`./js/${workerSrc}.js`, { type: 'module' });
+        const worker = new Worker(`http://localhost:3000/js/${workerSrc}.js`, { type: 'module' });
         worker.isAvailable = true;
         worker.isReady = false;
         predictWorkers.push(worker)

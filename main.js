@@ -292,17 +292,7 @@ async function createWindow() {
     // Hide nav bar except in ci mode
 
     mainWindow.setMenuBarVisibility(!!process.env.CI);
-    workerWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-        callback({
-            responseHeaders: {
-                ...details.responseHeaders,
-                'Access-Control-Allow-Origin': ['*'],
-                'Cross-Origin-Resource-Policy': ['cross-origin'],
-                'Cross-Origin-Embedder-Policy': ['require-corp'],
-                'Cross-Origin-Opener-Policy': ['cross-origin'],
-            },
-        });
-    });
+
     // and load the index.html of the app.
     mainWindow.loadFile('index.html');
     
@@ -362,19 +352,8 @@ async function createWorker() {
     // Track window state
     mainWindowStateKeeper.track(workerWindow);
     workerWindow.setIcon(__dirname + '/img/icon/icon.png');
-          // Add necessary headers for cross-origin isolation
-    workerWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-        callback({
-            responseHeaders: {
-                ...details.responseHeaders,
-                'Access-Control-Allow-Origin': ['*'],
-                'Cross-Origin-Resource-Policy': ['cross-origin'],
-                'Cross-Origin-Embedder-Policy': ['require-corp'],
-                'Cross-Origin-Opener-Policy': ['cross-origin'],
-            },
-        });
-    });
-    await workerWindow.loadURL('https://localhost:3000/worker.html');
+
+    await workerWindow.loadFile('./worker.html');
     
     workerWindow.on('closed', () => {
         workerWindow = undefined;

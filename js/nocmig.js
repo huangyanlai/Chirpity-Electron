@@ -2,15 +2,16 @@ let tf, BACKEND;
 tf = require('@tensorflow/tfjs-core');
 require('@tensorflow/tfjs-backend-wasm')
 const {setWasmPaths} = require('@tensorflow/tfjs-backend-wasm');
-setWasmPaths({
-    'tfjs-backend-wasm.wasm': '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-simd.wasm',
-    'tfjs-backend-wasm-simd.wasm': '../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm',
-    'tfjs-backend-wasm-threaded-simd.wasm':'../node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm'
-    });
+
+// setWasmPaths({
+//     'tfjs-backend-wasm.wasm': 'http://localhost:3000/node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-simd.wasm',
+//     'tfjs-backend-wasm-simd.wasm': 'http://localhost:3000/node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm',
+//     'tfjs-backend-wasm-threaded-simd.wasm':'http://localhost:3000/node_modules/@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm'
+//     });
+setWasmPaths('../node_modules/@tensorflow/tfjs-backend-wasm/dist/', true);
     BACKEND = 'wasm'
 
-const fs = require('node:fs');
-const path = require('node:path');
+
 import {BaseModel} from './BaseModel.js';
 let DEBUG = false;
 
@@ -22,10 +23,10 @@ const CONFIG = {
     sampleRate: 24_000, specLength: 3, sigmoid: 1,
 };
 
-function loadModel(params){
+async function loadModel(params){
     const version = params.model;
     DEBUG && console.log("load request to worker");
-    const { height, width, labels, location } = JSON.parse(fs.readFileSync(path.join(__dirname, `../${version}_model_config.json`), "utf8"));
+    const { height, width, labels, location } = await fetch(`http://localhost:3000/${version}_model_config.json`).then(response => response.json());
     const appPath = "../" + location + "/";
     const list = params.list;
     const batch = params.batchSize;
@@ -85,7 +86,7 @@ onmessage = async (e) => {
                 break;
             }
             case "load": {
-                loadModel(e.data)
+                await loadModel(e.data)
                 break;
                 }
             case "predict": {
@@ -277,16 +278,16 @@ class ChirpityModel extends BaseModel {
     }
 
     async predictChunk(audioBuffer, start, fileStart, file, threshold, confidence) {
-        DEBUG && console.log('predictCunk begin', tf.memory().numTensors);
-        console.log('THreads', tf.env().getFlags())
+        DEBUG && console.log('predictChunk begin', tf.memory().numTensors);
         await tf.setBackend('tensorflow');
         const [buffers, numSamples] = this.createAudioTensorBatch(audioBuffer);
-        const spectrograms = tf.unstack(buffers).map(x => this.makeSpectrogram(x));
+        const spectrograms = tf.tidy(() => tf.unstack(buffers).map(x => this.makeSpectrogram(x)) ) ;
         await tf.setBackend('wasm');
-        const specBatch = this.fixUpSpecBatch(tf.stack(spectrograms));
-        buffers.dispose(); spectrograms.dispose();
+        const specBatch = tf.tidy(() => this.fixUpSpecBatch(tf.stack(spectrograms)) );
+        buffers.dispose(); spectrograms.forEach(spec => spec.dispose());
         const batchKeys = this.getKeys(numSamples, start);
         const result = await this.predictBatch(specBatch, batchKeys, threshold, confidence);
+        specBatch.dispose();
         return [result, file, fileStart];
     }
 }
