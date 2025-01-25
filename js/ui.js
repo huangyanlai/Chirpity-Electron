@@ -1808,11 +1808,11 @@ window.onload = async () => {
         contextAwareIconDisplay();
         DOM.debugMode.checked = config.debug;
         showThreshold(config.detect.confidence);
-        SNRSlider.value = config.filters.SNR;
-        SNRThreshold.textContent = config.filters.SNR;
-        if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
-            SNRSlider.disabled = true;
-        };
+        // SNRSlider.value = config.filters.SNR;
+        // SNRThreshold.textContent = config.filters.SNR;
+        // if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
+        //     SNRSlider.disabled = true;
+        // };
         
         
         // Filters
@@ -2684,23 +2684,23 @@ function onChartData(args) {
         backendEL.checked = true;
         if (backend === 'webgl' || backend === 'webgpu') {
             DOM.threadSlider.max = 3;
-            SNRSlider.disabled = true;
-            config.filters.SNR = 0;
+            // SNRSlider.disabled = true;
+            // config.filters.SNR = 0;
         } else {
             DOM.threadSlider.max = DIAGNOSTICS['Cores'];
             DOM.contextAware.disabled = false;
             if (DOM.contextAware.checked) {
                 config.detect.contextAware = true;
-                SNRSlider.disabled = true;
-                config.filters.SNR = 0;
+                // SNRSlider.disabled = true;
+                // config.filters.SNR = 0;
             } else {
-                SNRSlider.disabled = false;
-                config.filters.SNR = parseFloat(SNRSlider.value);
-                if (config.filters.SNR) {
-                    DOM.contextAware.disabled = true;
-                    config.detect.contextAware = false;
-                    contextAwareIconDisplay();
-                }
+                // SNRSlider.disabled = false;
+                // config.filters.SNR = parseFloat(SNRSlider.value);
+                // if (config.filters.SNR) {
+                //     DOM.contextAware.disabled = true;
+                //     config.detect.contextAware = false;
+                //     contextAwareIconDisplay();
+                // }
             }
         }
         // Update threads and batch Size in UI
@@ -3963,24 +3963,30 @@ function formatDuration(seconds){
     const modelSettingsDisplay = () => {
         // Sets system options according to model or machine cababilities
         // cf. setListUIState
-        const chirpityOnly = document.querySelectorAll('.chirpity-only');
+        const chirpityOnly = document.querySelectorAll('.chirpity-only, .chirpity-only-visible');
         const noMac = document.querySelectorAll('.no-mac');
         const nodeOnly = document.querySelectorAll('.node-only');
         if (config.model === 'birdnet'){
             // hide chirpity-only features
-            chirpityOnly.forEach(element => element.classList.add('d-none'));
+            chirpityOnly.forEach(element => {
+                element.classList.add('chirpity-only');
+                element.classList.remove('chirpity-only-visible')
+        });
             DOM.contextAware.checked = false;
             DOM.contextAware.disabed = true;
             config.detect.contextAware = false;
-            SNRSlider.disabled = true;
+            // SNRSlider.disabled = true;
             config.filters.SNR = 0;
         } else {
             // show chirpity-only features
-            chirpityOnly.forEach(element => element.classList.remove('d-none'));
+            chirpityOnly.forEach(element => {
+                element.classList.remove('chirpity-only');
+                element.classList.add('chirpity-only-visible')
+        });
             // Remove GPU option on Mac
             isMac && noMac.forEach(element => element.classList.add('d-none'));
             DOM.contextAware.checked = config.detect.contextAware;            
-            SNRSlider.disabled = false;
+            // SNRSlider.disabled = false;
             if (config.hasNode){
                 nodeOnly.forEach(element => element.classList.remove('d-none'));
             } else {
@@ -4019,13 +4025,13 @@ function formatDuration(seconds){
         if (config.model !== 'birdnet') config.detect.contextAware = !config.detect.contextAware;
         DOM.contextAware.checked = config.detect.contextAware;
         contextAwareIconDisplay();
-        if (config.detect.contextAware) {
-            SNRSlider.disabled = true;
-            config.filters.SNR = 0;
-        } else if (config[config.model].backend !== 'webgl'  && config.model !== 'birdnet') {
-            SNRSlider.disabled = false;
-            config.filters.SNR = parseFloat(SNRSlider.value);
-        }
+        // if (config.detect.contextAware) {
+        //     SNRSlider.disabled = true;
+        //     config.filters.SNR = 0;
+        // } else if (config[config.model].backend !== 'webgl'  && config.model !== 'birdnet') {
+        //     SNRSlider.disabled = false;
+        //     config.filters.SNR = parseFloat(SNRSlider.value);
+        // }
         worker.postMessage({
             action: 'update-state',
             detect: { contextAware: config.detect.contextAware },
@@ -4526,25 +4532,25 @@ const setSortOrder = (order) => {
     }
     
     // SNR
-    const handleSNRchange = () => {
-        config.filters.SNR = parseFloat(SNRSlider.value);
-        if (config.filters.SNR > 0) {
-            config.detect.contextAware = false;
-            DOM.contextAware.disabled = true;
-        } else {
-            config.detect.contextAware = DOM.contextAware.checked;
-            DOM.contextAware.disabled = false;
-        }
-        worker.postMessage({ action: 'update-state', filters: { SNR: config.filters.SNR } })
-        filterIconDisplay();
-    }
+    // const handleSNRchange = () => {
+    //     config.filters.SNR = parseFloat(SNRSlider.value);
+    //     if (config.filters.SNR > 0) {
+    //         config.detect.contextAware = false;
+    //         DOM.contextAware.disabled = true;
+    //     } else {
+    //         config.detect.contextAware = DOM.contextAware.checked;
+    //         DOM.contextAware.disabled = false;
+    //     }
+    //     worker.postMessage({ action: 'update-state', filters: { SNR: config.filters.SNR } })
+    //     filterIconDisplay();
+    // }
     
     
-    const SNRThreshold = document.getElementById('SNR-threshold');
-    const SNRSlider = document.getElementById('snrValue');
-    SNRSlider.addEventListener('input', () => {
-        SNRThreshold.textContent = SNRSlider.value;
-    });
+    // const SNRThreshold = document.getElementById('SNR-threshold');
+    // // const SNRSlider = document.getElementById('snrValue');
+    // SNRSlider.addEventListener('input', () => {
+    //     SNRThreshold.textContent = SNRSlider.value;
+    // });
 
     const colorMapThreshold = document.getElementById('color-threshold');
     const colorMapSlider = document.getElementById('color-threshold-slider');
