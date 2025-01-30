@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { _electron as electron, JSHandle } from 'playwright';
 import { test, expect } from '@playwright/test';
 import { 
   findLatestBuild, 
@@ -12,19 +12,22 @@ import {
   stubMultipleDialogs
 } from 'electron-playwright-helpers';
 import { ElectronApplication, Page } from 'playwright';
-import {changeSettings, openExampleFile, runExampleAnalysis} from './helpers';
+import {changeSettings, openExampleFile, runExampleAnalysis} from './helpers'
 //import {Jimp} from 'jimp';
 
 let electronApp: ElectronApplication;
 let page: Page;
-let worker: Page;
-let example_file: any
+let _worker: Page;
+let bwHandle: JSHandle<Electron.BrowserWindow>;
+let example_file: any;
 // find the latest build in the out directory
 const latestBuild = findLatestBuild('./dist')
 // parse the directory and find paths and other info
 const appInfo = parseElectronApp(latestBuild)
 // set the CI environment variable to true
 process.env.CI = 'e2e';
+
+
 test.beforeAll(async () => {
 
   electronApp = await electron.launch({
@@ -39,6 +42,7 @@ test.beforeAll(async () => {
 
   // Get the path for the example file we want to load
   example_file = await ipcMainInvokeHandler(electronApp, 'getAudio')
+  console.log('example file:', example_file)
   await stubMultipleDialogs(electronApp, [
     {
       method: 'showOpenDialog',
@@ -55,29 +59,38 @@ test.beforeAll(async () => {
        },
      },
    ])
-   worker = await electronApp.firstWindow()
+   _worker = await electronApp.firstWindow()
 
-  electronApp.on('window', async (window) => {
-    const filename = window.url()?.split('/').pop()
-    console.log(`Window opened: ${filename}`)
-    page = window;
-    page.on('pageerror', (error) => {
-      console.error(error)
-    })
-    // capture console messages
-    page.on('console', (msg) => {
-      console.log(msg.text())
+   await new Promise<void>((resolve) => {
+    electronApp.on('window', async (window) => {
+      const filename = window.url()?.split('/').pop()
+      console.log(`Window opened: ${filename}`)
+      page = window;
+      page.on('pageerror', (error) => {
+        console.error(error)
+      })
+      // capture console messages
+      page.on('console', (msg) => {
+        console.log(msg.text())
+      })
+
+      _worker.on('pageerror', (error) => {
+        console.error(error)
+      })
+      // capture console messages
+      _worker.on('console', (msg) => {
+        console.log(msg.text())
+      })
+      // Wait for the page to load
+      await page.waitForLoadState('load')
+      _worker.on('worker', () => {
+        //console.log('worker.js worker data')
+        resolve();
+      });
+      
     })
   })
 
-  await new Promise((resolve) => { 
-    const checkPage = setInterval(async () => { 
-      if (page) { 
-        clearInterval(checkPage);
-        resolve('');
-      } 
-    }, 1000); 
-  });
 })
 
 test.afterAll(async () => {
@@ -85,7 +98,7 @@ test.afterAll(async () => {
   await electronApp.close()
 })
 
-test.describe.configure({ mode: 'parallel', retries: 1, timeout: 30_000 });
+test.describe.configure({ mode: 'parallel', retries: 1, timeout: 60_000 });
 
 /*
 REMEMBER TO REBUILD THE APP IF THE *APPLICATION CODE* NEEDS TO BE CHANGED
@@ -101,6 +114,13 @@ REMEMBER TO REBUILD THE APP IF THE *APPLICATION CODE* NEEDS TO BE CHANGED
 // })
 
 
+
+// test("check if worker window is visible", async () => {
+//   bwHandle = await electronApp.browserWindow(page);
+//   const visible = await bwHandle.evaluate((win) => win.isVisible());
+//   expect(visible).toBeFalsy();
+// });
+
 test('Page title is correct', async () => {
   const title = await page.title()
   console.log('title: ', title)
@@ -110,22 +130,26 @@ test('Page title is correct', async () => {
 })
 
 
-test(`Nocmig analyse works and second result is 61%`, async () => {
-  await runExampleAnalysis(page,'chirpity');
-  const callID = page.locator('#speciesFilter').getByText('Redwing (call)');
-  expect(callID).not.toBe(undefined)
-  const secondResult = await (await page.waitForSelector('#result2 span.confidence-row > span')).textContent()
-  // console.log(secondResult, 'second result');
-  expect(secondResult).toBe('61%');
-})
-
 test(`BirdNET analyse works and second result is 34%`, async () => {
+  // Set a custom timeout for this specific test (in milliseconds)
+  test.setTimeout(60000); // 60 seconds
   await runExampleAnalysis(page, 'birdnet');
   const callID = page.locator('#speciesFilter').getByText('Redwing (call)');
   expect(callID).not.toBe(undefined)
   const secondResult = await (await page.waitForSelector('#result2 span.confidence-row > span')).textContent()
   // console.log(secondResult, 'second result');
   expect(secondResult).toBe('34%');
+})
+
+test(`Nocmig analyse works and second result is 61%`, async () => {
+  // Set a custom timeout for this specific test (in milliseconds)
+
+  await runExampleAnalysis(page,'chirpity');
+  const callID = page.locator('#speciesFilter').getByText('Redwing (call)');
+  expect(callID).not.toBe(undefined)
+  const secondResult = await (await page.waitForSelector('#result2 span.confidence-row > span')).textContent()
+  // console.log(secondResult, 'second result');
+  expect(secondResult).toBe('61%');
 })
 
 

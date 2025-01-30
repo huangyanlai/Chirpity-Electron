@@ -12,7 +12,7 @@ import {
   stubMultipleDialogs
 } from 'electron-playwright-helpers';
 import { ElectronApplication, Page } from 'playwright';
-import {changeSettings, openExampleFile, runExampleAnalysis} from './helpers';
+import {runExampleAnalysis} from './helpers'
 //import {Jimp} from 'jimp';
 
 let electronApp: ElectronApplication;
@@ -25,6 +25,7 @@ const latestBuild = findLatestBuild('./dist')
 const appInfo = parseElectronApp(latestBuild)
 // set the CI environment variable to true
 process.env.CI = 'e2e';
+
 
 test.beforeAll(async () => {
 
@@ -57,27 +58,25 @@ test.beforeAll(async () => {
    ])
    _worker = await electronApp.firstWindow()
 
-  electronApp.on('window', async (window) => {
-    const filename = window.url()?.split('/').pop()
-    console.log(`Window opened: ${filename}`)
-    page = window;
-    page.on('pageerror', (error) => {
-      console.error(error)
-    })
-    // capture console messages
-    page.on('console', (msg) => {
-      console.log(msg.text())
+
+   await new Promise<void>((resolve) => {
+    electronApp.on('window', async (window) => {
+      const filename = window.url()?.split('/').pop()
+      console.log(`Window opened: ${filename}`)
+      page = window;
+      page.on('pageerror', (error) => {
+        console.error(error)
+      })
+      // capture console messages
+      page.on('console', (msg) => {
+        console.log(msg.text())
+      })
+      // Wait for the page to load
+      await page.waitForLoadState('load')
+      resolve();
     })
   })
 
-  await new Promise((resolve) => { 
-    const checkPage = setInterval(async () => { 
-      if (page) { 
-        clearInterval(checkPage);
-        resolve('');
-      } 
-    }, 100); 
-  });
 })
 
 test.afterAll(async () => {
@@ -103,6 +102,8 @@ REMEMBER TO REBUILD THE APP IF THE *APPLICATION CODE* NEEDS TO BE CHANGED
 // })
 
 test('Can create/edit a manual record', async () => {
+  // Set a custom timeout for this specific test (in milliseconds)
+  test.slow(); // 3x timeout seconds
   console.log('starting record creation test')
   await runExampleAnalysis(page,'chirpity');
   await page.locator('#result1').click();

@@ -70,7 +70,8 @@
       "keyboardHelp": ["Tastaturgenveje"],
       "diagnostics": ["Diagnostik"],
       "startTour": ["Vis tur"],
-      "bugs": ["Deltag i fællesskabet"],
+      "community": ["Deltag i fællesskabet"],
+      "known-issues": ["Kendte problemer (på engelsk)"],
       "FAQ": ["Ofte stillede spørgsmål"],
       "species": ["Hvilke arter er detekteret?"],
       "eBird": ["Hvad er en eBird rekord?"],
@@ -89,6 +90,8 @@
       "archive-location-select": ["Biblioteksplacering:"],
       "close-tour": ["Luk"],
       "settings": {
+        "basic": "Standard",
+        "advanced": "Ekspert",
         "clear-call-cache": ["Ryd referencelyd-cache"],
         "reset-defaults": ["Nulstil til standardindstillinger"],
         "model-to-use": "Model:",
@@ -98,7 +101,7 @@
         "species-frequency-threshold": "Artstrøskel",
         "species-week": "Justér listen for årets uge",
         "nocmig": "Analyser kun nattetimer.",
-        "iucn": "Vis IUCN Rød Liste status for arter i oversigten.",
+        "iucn": "Vis IUCN Rød Liste status for arter",
         "iucn-scope": "Vurderingsomfang:",
         "latitude": "Bredde:", "longitude": "Længde:",
         "locale": "Sprog:",
@@ -137,6 +140,7 @@
         "context": "Konteksttilstand",
         "snrValue": "SNR filter:",
         "file-timestamp": "Filens tidsstempler markerer optagelsens start",
+        "buy-coffee": "Skjul kaffewidget",
         "debug-mode": "Fejlfindingstilstand"
       },
       "record-entry": {

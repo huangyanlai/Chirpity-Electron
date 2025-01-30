@@ -1,23 +1,19 @@
-let tf, BACKEND;
+let tf;
 
 try {
     tf = require('@tensorflow/tfjs-node');
 } catch {
     tf = require('@tensorflow/tfjs');
-    BACKEND = 'webgpu';
 }
 
 const DEBUG = false;
-const CONFIG = {
-    sampleRate: 24_000, specLength: 3, sigmoid: 1,
-};
 class BaseModel {
     constructor(appPath, version) {
         this.model = undefined;
         this.labels = undefined;
         this.height = undefined;
         this.width = undefined;
-        this.config = CONFIG;
+        this.config = {sampleRate: 24_000, specLength: 3, sigmoid: 1};
         this.chunkLength = this.config.sampleRate * this.config.specLength;
         this.model_loaded = false;
         this.frame_length = 512;
@@ -52,7 +48,7 @@ class BaseModel {
         // https://github.com/tensorflow/tfjs/pull/7755/files#diff-a70aa640d286e39c922aa79fc636e610cae6e3a50dd75b3960d0acbe543c3a49R316
         if (tf.getBackend() === 'webgl') {
             tf.env().set('ENGINE_COMPILE_ONLY', true);
-            const compileRes = this.model.predict(input, { batchSize: this.batchSize });
+            const compileRes = this.model.predict(input);
             tf.env().set('ENGINE_COMPILE_ONLY', false);
             await tf.backend().checkCompileCompletionAsync();
             tf.backend().getUniformLocations();
@@ -60,9 +56,12 @@ class BaseModel {
             input.dispose();
         } else if (tf.getBackend() === 'webgpu') {
             tf.env().set('WEBGPU_ENGINE_COMPILE_ONLY', true);
-            const compileRes = this.model.predict(input, { batchSize: this.batchSize });
-            tf.env().set('WEBGPU_ENGINE_COMPILE_ONLY', false);
+            const compileRes = this.model.predict(input);
             await tf.backend().checkCompileCompletionAsync();
+            tf.dispose(compileRes);
+            tf.env().set('WEBGPU_ENGINE_COMPILE_ONLY', false);
+        } else { // Tensorflow backend
+            const compileRes = this.model.predict(input);
             tf.dispose(compileRes);
         }
         input.dispose()
@@ -103,7 +102,7 @@ class BaseModel {
         indices.dispose();
         values.dispose();
 
-        keys = keys.map(key => (key / CONFIG.sampleRate).toFixed(3));
+        keys = keys.map(key => (key / this.config.sampleRate).toFixed(3));
         return [keys, topIndices, topValues];
     }
 

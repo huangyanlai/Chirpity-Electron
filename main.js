@@ -291,15 +291,14 @@ async function createWindow() {
     // Hide nav bar except in ci mode
 
     mainWindow.setMenuBarVisibility(!!process.env.CI);
-    
+
     // and load the index.html of the app.
     mainWindow.loadFile('index.html');
     
-    // Open the DevTools. Comment out for release
-    if (DEBUG) mainWindow.webContents.openDevTools();
-    
+   
     mainWindow.once('ready-to-show', () => {
         mainWindow.show()
+        DEBUG && mainWindow.webContents.openDevTools({ mode: 'detach' });
     })
     DEBUG && console.log("main window created");
     // Emitted when the window is closed.
@@ -332,7 +331,7 @@ async function createWorker() {
     // Get window state
     const mainWindowStateKeeper = await windowStateKeeper('worker');
     workerWindow = new BrowserWindow({
-        show: DEBUG,
+        show: false,
         x: mainWindowStateKeeper.x,
         y: mainWindowStateKeeper.y,
         width: mainWindowStateKeeper.width,
@@ -352,12 +351,22 @@ async function createWorker() {
     workerWindow.on('closed', () => {
         workerWindow = undefined;
     });
-    if (DEBUG) workerWindow.webContents.openDevTools();
+    workerWindow.once('ready-to-show', () => {
+        if (DEBUG) {
+            workerWindow.show();
+            workerWindow.webContents.openDevTools();
+        }
+    })
     DEBUG && console.log("worker created");
 }
 
 // This method will be called when Electron has finished loading
 app.whenReady().then(async () => {
+    // First thing - are we the only CHirpity running?
+    const gotLock = app.requestSingleInstanceLock()
+    console.log('lock obtained:', gotLock)
+    if (!gotLock) app.quit()
+
     // Update the userData path for portable app
     if (process.env.PORTABLE_EXECUTABLE_DIR) {
         app.setPath ('userData', path.join(process.env.PORTABLE_EXECUTABLE_DIR, "chirpity-data"));
@@ -412,6 +421,14 @@ app.whenReady().then(async () => {
             await createWindow();
         }
     });
+    app.on('second-instance', () => {
+        // This event is emitted when a second instance is launched
+        // Focus the primary instance's window
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+        }
+      });
     
     app.on('open-file', (event, path) => {
         files.push(path);
@@ -423,12 +440,12 @@ app.whenReady().then(async () => {
         let options;
         if (type === 'audio') {
              options = {
-                filters: [
-                    { name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'mpga', 'mpeg', 'mp4', 'opus', 'mov'] } 
-                ],
                 properties: [fileOrFolder, multi] ,
                 buttonLabel: buttonLabel,
                 title: title
+            }
+            if (fileOrFolder === 'openFile' ){
+                options.filters = [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a', 'mpga', 'mpeg', 'mp4', 'opus', 'mov'] } ]
             }
         } else {
             options = {
@@ -480,11 +497,12 @@ app.whenReady().then(async () => {
         })
     });
     //Update handling
-    autoUpdater.autoDownload = false;
-    autoUpdater.checkForUpdatesAndNotify().catch(error => console.warn('Error checking for updates', error))
-    // Allow multiple instances of Chirpity - experimental! This alone doesn't work:
-    //app.releaseSingleInstanceLock()
-
+    if (isMac ||  process.env.CI) {
+        console.log('Auto-updater disabled in CI and Mac environments.');
+    } else {
+        autoUpdater.autoDownload = false;
+        autoUpdater.checkForUpdatesAndNotify().catch(error => console.warn('Error checking for updates', error))
+    }
 });
 
 

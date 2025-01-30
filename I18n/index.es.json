@@ -69,7 +69,8 @@
     "keyboardHelp": ["Atajos de teclado"],
     "diagnostics": ["Diagnóstico"],
     "startTour": ["Aspectos básicos"],
-    "bugs": ["Únete a la comunidad"],
+    "community": ["Únete a la comunidad"],
+    "known-issues": ["Problemas conocidos (en inglés)"],    
     "FAQ": ["Preguntas frecuentes"],
     "species": ["¿Qué especies se detectan?"],
     "eBird": ["¿Qué es un registro de eBird?"],
@@ -88,6 +89,8 @@
     "archive-location-select": ["Ubicación de la biblioteca:"],
     "close-tour": ["Cerrar"],
     "settings": {
+      "basic": "Estándar",
+      "advanced": "Experto",
       "clear-call-cache": ["Borrar la caché de los reclamos de referencia"],
       "reset-defaults": ["Volver a la configuración predeterminada"],
       "model-to-use": "Modelo:",
@@ -97,7 +100,7 @@
       "species-frequency-threshold": "Umbral",
       "species-week": "Ajustar la lista para la semana del año",
       "nocmig": "Analizar solo períodos nocturnos.",
-      "iucn": "Mostrar el estado de la Lista Roja de la UICN en el resumen de especies.",
+      "iucn": "Mostrar el estado de la Lista Roja de especies.",
       "iucn-scope": "Área:",
       "locale": "Idioma:",
       "latitude": "Latitud:", "longitude": "Longitud:",
@@ -136,6 +139,7 @@
       "context": "Modo contexto",
       "snrValue": "Filtro SNR:",
       "file-timestamp": "Las marcas de tiempo de los archivos marcan el inicio de la grabación",
+      "buy-coffee": "Ocultar el widget de café",
       "debug-mode": "Modo depuración"
     },
     "record-entry": {

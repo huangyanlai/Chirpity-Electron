@@ -188,8 +188,8 @@ onmessage = async (e) => {
         switch (message) {
 
             case "get-list": {
-                const {model, listType, currentLabels, useWeek, customList}  = e.data;
-                listModel.customList = customList;
+                const {model, listType, currentLabels, useWeek, customLabels}  = e.data;
+                listModel.customLabels = customLabels;
                 listModel.model = model;
                 if (model !== 'birdnet'){
                     listModel.modelLabels[model] ??= JSON.parse(fs.readFileSync(path.join(__dirname, `../${model}_model_config.json`), "utf8")).labels;
@@ -306,9 +306,9 @@ class Model {
                 includedIDs = Array.from(includedIDset);
             }
         } else if (listType === 'custom'){
-            if (this.customList){ // hack: why it gets called first without a customlist I don't know! But it will be called a second time with one.
+            if (this.customLabels){ // hack: why it gets called first without customLabels I don't know! But it will be called a second time with one.
                 const labelsScientificNames = currentLabels.map(getFirstElement);
-                const customScienticNames = this.customList.map(getFirstElement);
+                const customScienticNames = this.customLabels.map(getFirstElement);
                 let line = 0;
                 for (let i = 0; i < customScienticNames.length; i++) {
                     const sname = customScienticNames[i];
@@ -323,7 +323,7 @@ class Model {
                                 if (wordInBrackets) {
                                     const wordToMatch = wordInBrackets[0];
                                     // Check if the word in brackets exists in the custom list at the same index position
-                                    if (this.customList[i].includes(wordToMatch)) {
+                                    if (this.customLabels[i].includes(wordToMatch)) {
                                         selectedIndexes.push(idx);
                                     }
                                 } else {

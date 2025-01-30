@@ -69,7 +69,8 @@
     "keyboardHelp": ["Raccourcis clavier"],
     "diagnostics": ["Diagnostics"],
     "startTour": ["Afficher la visite"],
-    "bugs": ["Rejoindre la communauté"],
+    "community": ["Rejoindre la communauté"],
+    "known-issues": ["Problèmes connus (en anglais)"],  
     "FAQ": ["FAQs"],
     "species": ["Quelles espèces sont détectées ?"],
     "eBird": ["Qu'est-ce qu'un enregistrement eBird ?"],
@@ -88,6 +89,8 @@
     "archive-location-select": ["Lieu de la Bibliothèque:"],
     "close-tour": ["Fermer"],
     "settings": {
+      "basic": "Standard",
+      "advanced": "Expert",
       "clear-call-cache": ["Effacer le cache des cris de référence"],
       "reset-defaults": ["Réinitialiser aux paramètres par défaut"],
       "model-to-use": "Modèle :",
@@ -97,7 +100,7 @@
       "species-frequency-threshold": "Seuil des Espèces",
       "species-week": "Ajuster la liste pour la semaine de l'année",
       "nocmig": "Analyser uniquement les périodes nocturnes.",
-      "iucn": "Afficher le statut de la liste rouge de l'UICN dans le résumé des espèces.",
+      "iucn": "Afficher le statut de la liste rouge de l'UICN des espèces",
       "iucn-scope": "Portée de l'évaluation :",
       "locale": "Langue :",
       "latitude": "Lat:", "longitude": "Long:",
@@ -136,6 +139,7 @@
       "context": "Mode contexte",
       "snrValue": "Filtre SNR :",
       "file-timestamp": "Les horodatages des fichiers marquent le début de l'enregistrement",
+      "buy-coffee": "Cacher le widget de café",
       "debug-mode": "Mode débogage"
     },
     "record-entry": {

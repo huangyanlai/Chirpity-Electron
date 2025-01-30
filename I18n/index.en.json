@@ -72,7 +72,8 @@
     "keyboardHelp": ["Keyboard Shortcuts"],
     "diagnostics": ["Diagnostics"],
     "startTour": ["Show Tour"],
-    "bugs": ["Join the community"],
+    "community": ["Join the community"],
+    "known-issues": ["Known Issues"],
     "FAQ": ["FAQs"],
     "species": ["What species are detected?"],
     "eBird": ["What is an eBird Record?"],
@@ -93,6 +94,8 @@
     "archive-location-select": ["Library Location:"],
     "close-tour": ["Close"],
     "settings": {
+      "basic": "Standard",
+      "advanced": "Expert",
       "clear-call-cache": ["Clear Reference Call Cache"],
       "reset-defaults": ["Reset to default settings"],
       "model-to-use": "Model:",
@@ -102,7 +105,7 @@
       "species-frequency-threshold": "Species Threshold",
       "species-week": "Adjust list for the week of the year",
       "nocmig": "Only analyse night time periods.",
-      "iucn": "Show species IUCN Red List status in summary.",
+      "iucn": "Show species IUCN Red List status",
       "iucn-scope": "Assessment Scope:",
       "locale": "Language:",
       "latitude": "Lat:", "longitude": "Lon:",
@@ -141,6 +144,7 @@
       "context": "Context mode",
       "snrValue": "SNR filter:",
       "file-timestamp": "File timestamps mark recording start",
+      "buy-coffee": "Hide the coffee widget",
       "debug-mode": "Debug mode"
     },
     "record-entry":{

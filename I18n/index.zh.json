@@ -69,7 +69,8 @@
   "keyboardHelp": ["键盘快捷键"],
   "diagnostics": ["诊断"],
   "startTour": ["显示导览"],
-  "bugs": ["加入社区"],
+  "community": ["加入社区"],
+  "known-issues": ["已知问题（英文）"], 
   "FAQ": ["常见问题"],
   "species": ["检测到哪些物种？"],
   "eBird": ["什么是eBird记录？"],
@@ -88,6 +89,8 @@
   "archive-location-select": ["库位置："],
   "close-tour": ["关闭"],
   "settings": {
+    "basic": "标准",
+    "advanced": "专家",
     "clear-call-cache": ["清除参考通话缓存"],
     "reset-defaults": ["恢复默认设置"],
     "model-to-use": "模型：",
@@ -136,6 +139,7 @@
     "context": "上下文模式",
     "snrValue": "SNR滤波器：",
     "file-timestamp": "文件时间戳标记录音开始",
+    "buy-coffee": "隐藏咖啡小部件",
     "debug-mode": "调试模式"
   },
   "record-entry": {

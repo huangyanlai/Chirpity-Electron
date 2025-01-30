@@ -1,7 +1,8 @@
 import {trackVisit, trackEvent} from './tracking.js';
 import {DOM} from './DOMcache.js';
 import {IUCNCache} from './IUCNcache.js';
-import {i18nSpeciesList,i18nHeadings, localiseUI, i18nContext, i18nLocation, i18nForm, i18nHelp, i18nToasts, i18nTitles, i18nLIST_MAP, i18nLists, IUCNLabel} from './i18n.js';
+import {fetchIssuesByLabel, renderIssuesInModal, parseSemVer, isNewVersion} from './getKnownIssues.js';
+import {i18nAll, i18nSpeciesList,i18nHeadings, localiseUI, i18nContext, i18nLocation, i18nForm, i18nHelp, i18nToasts, i18nTitles, i18nLIST_MAP, i18nLists, IUCNLabel, i18nLocate} from './i18n.js';
 let LOCATIONS, locationID = undefined, loadingTimeout, LIST_MAP;
 
 let LABELS = [], DELETE_HISTORY = [];
@@ -57,6 +58,7 @@ window.addEventListener('rejectionhandled', function(event) {
 
 let STATE = {
     metadata: {},
+    lastGestureTime: 0,
     mode: 'analyse',
     analysisDone: false,
     openFiles: [],
@@ -71,10 +73,12 @@ let STATE = {
     },
     resultsSortOrder: 'timestamp',
     summarySortOrder: 'cname ASC',
+    dataForatOptions: { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' },
     birdList: { lastSelectedSpecies: undefined }, // Used to put the last selected species at the top of the all-species list
     selection: { start: undefined, end: undefined },
     currentAnalysis: {currentFile: null, openFiles: [],  mode: null, species: null, offset: 0, active: null},
-    IUCNcache:IUCNCache
+    IUCNcache:IUCNCache,
+    translations: ['da', 'de', 'es', 'fr', 'ja', 'nl', 'pt', 'ru', 'sv', 'zh' ]
 }
 
 // Batch size map for slider
@@ -89,7 +93,7 @@ const os = window.module.os;
 
 // Is this CI / playwright?
 const isTestEnv = window.env.TEST_ENV === 'true';
-
+isTestEnv && console.log('Running in test environment');
 function hexToRgb(hex) {
     // Remove the '#' character if present
     hex = hex.replace(/^#/, '');
@@ -150,7 +154,7 @@ async function getPaths() {
     const appPath = await window.electron.getPath();
     const tempPath = await window.electron.getTemp();
     const locale = await window.electron.getLocale();
-    console.log('path is', appPath, 'temp is', tempPath, 'raw locale is', locale);
+    //console.log('path is', appPath, 'temp is', tempPath, 'raw locale is', locale);
     return [appPath, tempPath, locale];
 }
 
@@ -174,7 +178,7 @@ let appVersionLoaded = new Promise((resolve, reject) => {
 let modelReady = false, fileLoaded = false;
 let PREDICTING = false, t0;
 let region, AUDACITY_LABELS = {}, wavesurfer;
-let fileStart, bufferStartTime, fileEnd;
+let bufferStartTime, fileEnd;
 
 
 // set up some DOM element handles
@@ -253,7 +257,7 @@ DIAGNOSTICS['Cores'] = os.cpus().length;
 DIAGNOSTICS['System Memory'] = (os.totalmem() / (1024 ** 2 * 1000)).toFixed(0) + ' GB';
 
 function resetResults({clearSummary = true, clearPagination = true, clearResults = true} = {}) {
-    if (clearSummary) summaryTable.textContent = '';
+    if (clearSummary) DOM.summaryTable.textContent = '';
     if (clearPagination) pagination.forEach(item => item.classList.add('d-none'));
     resultsBuffer = DOM.resultTable.cloneNode(false)
     if (clearResults) {
@@ -282,16 +286,15 @@ function updateProgress(val) {
 }
 
 /**
-* LoadAudiofile: Called when user opens a file (just opens first file in multiple files)
+* loadAudioFileSync: Called when user opens a file (just opens first file in multiple files)
 * and when clicking on filename in list of open files.
 * 
 * @param {*} filePath: full path to file
 * @param {*} preserveResults: whether to clear results when opening file (i.e. don't clear results when clicking file in list of open files)
 *  
 */
-function loadAudioFile({ filePath = '', preserveResults = false }) {
+function loadAudioFileSync({ filePath = '', preserveResults = false }) {
     fileLoaded = false; locationID = undefined;
-    //if (!preserveResults) worker.postMessage({ action: 'change-mode', mode: 'analyse' })
     worker.postMessage({
         action: 'file-load-request',
         file: filePath,
@@ -304,16 +307,11 @@ function loadAudioFile({ filePath = '', preserveResults = false }) {
 
 
 function updateSpec({ buffer, play = false, position = 0, resetSpec = false }) {
-    if (resetSpec || DOM.spectrogramWrapper.classList.contains('d-none')){
-        DOM.spectrogramWrapper.classList.remove('d-none');
-        wavesurfer.loadDecodedBuffer(buffer);
-        adjustSpecDims(true);
-    } else {
-        wavesurfer.loadDecodedBuffer(buffer);
-    }
+    DOM.spectrogramWrapper.classList.remove('d-none');   
+    resetSpec || !wavesurfer || !wavesurfer.isReady ? adjustSpecDims(true) 
+        : wavesurfer.loadDecodedBuffer(buffer);
     wavesurfer.seekTo(position);
     play ? wavesurfer.play() : wavesurfer.pause();
-    
 }
 
 function createTimeline() {
@@ -354,8 +352,8 @@ const initWavesurfer = ({
     height = 0
 }) => {
     const loggedErrors = new Set();
-    if (wavesurfer) {
-        wavesurfer.pause();
+    if (wavesurfer?.isReady) {
+        wavesurfer.destroy();
     }
     const audioCtx = new AudioContext({ latencyHint: 'interactive', sampleRate: sampleRate });
     // Setup waveform and spec views
@@ -435,7 +433,7 @@ const initWavesurfer = ({
             } else {
                 postBufferUpdate({ begin: bufferBegin, play: true })
             }
-            bufferBegin += windowLength;
+            //bufferBegin += windowLength;
         }
     });
     
@@ -452,7 +450,7 @@ const initWavesurfer = ({
     // Add event listener for the gesture events
     const wave = DOM.waveElement;
     wave.removeEventListener('wheel', handleGesture);
-    wave.addEventListener('wheel', handleGesture, false);
+    wave.addEventListener('wheel', handleGesture,  {passive: true});
 
     wave.removeEventListener('mousedown', resetRegions);
     wave.removeEventListener('mousemove', specTooltip);
@@ -470,7 +468,7 @@ function increaseFFT(){
     if (wavesurfer.spectrogram.fftSamples <= 4096) {
         wavesurfer.spectrogram.fftSamples *= 2;
         const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false, play: wavesurfer.isPlaying() })
         console.log(wavesurfer.spectrogram.fftSamples);
     }
 }
@@ -479,7 +477,7 @@ function reduceFFT(){
     if (wavesurfer.spectrogram.fftSamples > 64) {
         wavesurfer.spectrogram.fftSamples /= 2;
         const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
-        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+        postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false, play: wavesurfer.isPlaying() })
         console.log(wavesurfer.spectrogram.fftSamples);
     }
 }
@@ -518,7 +516,7 @@ function zoomSpec(direction) {
             region.start = (oldBufferBegin + region.start) - bufferBegin;
             region.end = region.start + duration;          
         }
-        postBufferUpdate({ begin: bufferBegin, position: position, region: region, goToRegion: false })
+        postBufferUpdate({ begin: bufferBegin, position: position, region: region, goToRegion: false, play: wavesurfer.isPlaying() })
     }
 }
 
@@ -538,8 +536,9 @@ function powerSave(on) {
 }
 
 const openFileInList = async (e) => {
-    if (!PREDICTING && e.target.tagName === 'A') {
-        loadAudioFile({ filePath: e.target.id, preserveResults: true })
+    const target = e.target;
+    if (!PREDICTING && (target.type === 'submit' || target.tagName === 'A')) {
+        loadAudioFileSync({ filePath: target.id || STATE.currentFile, preserveResults: true })
     }
 }
 
@@ -584,7 +583,7 @@ function showDatePicker() {
     const datetimeInput = document.createElement("input");
     datetimeInput.setAttribute("type", "datetime-local");
     datetimeInput.setAttribute("id", "fileStart");
-    datetimeInput.setAttribute("value", getDatetimeLocalFromEpoch(fileStart));
+    datetimeInput.setAttribute("value", getDatetimeLocalFromEpoch(STATE.fileStart));
     datetimeInput.setAttribute("max", getDatetimeLocalFromEpoch(new Date()));
     datetimeInput.classList.add("form-control");
     form.appendChild(datetimeInput);
@@ -616,7 +615,7 @@ function showDatePicker() {
         worker.postMessage({ action: 'update-file-start', file: STATE.currentFile, start: timestamp });
         trackEvent(config.UUID, 'Settings Change', 'fileStart', newStart);
         resetResults();
-        fileStart = timestamp;
+        STATE.fileStart = timestamp;
         // Remove the form from the DOM
         form.remove();
     });
@@ -629,6 +628,7 @@ function showDatePicker() {
 }
 
 const filename = DOM.filename;
+// This click handler is needed because the file links have their own id, so the global listener doesn't fire.
 filename.addEventListener('click', openFileInList);
 filename.addEventListener('contextmenu', buildFileMenu);
 
@@ -768,19 +768,7 @@ function customiseAnalysisMenu(saved) {
 
 
 async function generateLocationList(id) {
-    const d = {
-        "en": ["(Default)", "All"],
-        "da": ["(Standard)", "Alle"],
-        "de": ["(Standard)", "Alle"],
-        "es": ["(Predeterminado)", "Todos"],
-        "fr": ["(Par défaut)", "Tout"],
-        "nl": ["(Standaard)", "Alles"],
-        "pt": ["(Padrão)", "Todos"],
-        "ru": ["(По умолчанию)", "Все"],
-        "sv": ["(Standard)", "Alla"],
-        "zh": ["(默认)", "所有"]
-      }
-    const i18n = d[locale] || d['en'];
+    const i18n = i18nAll[config.locale] || i18nAll['en'];
     const defaultText = id === 'savedLocations' ? i18n[0] : i18n[1];
     const el = document.getElementById(id);
     LOCATIONS = undefined;
@@ -898,7 +886,6 @@ const setDefaultLocation = () => {
     button.innerHTML = 'Set <span class="material-symbols-outlined">done</span>';
 }
 
-
 async function setCustomLocation() {
     const savedLocationSelect = await generateLocationList('savedLocations');
     const latEl = document.getElementById('customLat');
@@ -984,40 +971,43 @@ function filterFilePaths(filePaths) {
     return filteredPaths
 }
 
+async function sortFilesByTime(fileNames) {
+    const fileData = await Promise.all(
+        fileNames.map(async (fileName) => {
+            const stats = await fs.promises.stat(fileName);
+            return { name: fileName, time: stats.mtime.getTime() };
+        })
+    );
 
+    return fileData
+        .sort((a, b) => a.time - b.time) // Sort by modification time
+        .map(file => file.name);        // Return sorted file names
+}
 async function onOpenFiles(args) {
     const sanitisedList = filterFilePaths(args.filePaths);
     if (!sanitisedList.length) return
+    DOM.loading.querySelector('#loadingText').textContent = 'Loading files...';
+    DOM.loading.classList.remove('d-none');
     // Store the sanitised file list and Load First audio file
     hideAll();
     showElement(['spectrogramWrapper'], false);
     resetResults();
     resetDiagnostics();
     STATE.openFiles = sanitisedList;
-    // CHeck not more than 25k files
-    if (STATE.openFiles.length >= 25_000){
-        generateToast({message: 'maxFiles', variables: {'STATE.openFiles.length': STATE.openFiles.length}})
-        STATE.openFiles.splice(25000)
-    }
-    // Store the file list and Load First audio file
 
-    STATE.openFiles.length > 1 && worker.postMessage({action: 'check-all-files-saved', files: STATE.openFiles});
+    // Store the file list and Load First audio file
+    worker.postMessage({action: 'check-all-files-saved', files: STATE.openFiles});
 
     // Sort file by time created (the oldest first):
     if (STATE.openFiles.length > 1) {
         if (modelReady) enableMenuItem(['analyseAll', 'reanalyseAll'])
-        STATE.openFiles = STATE.openFiles.map(fileName => ({
-            name: fileName,
-            time: fs.statSync(fileName).mtime.getTime(),
-        }))
-        .sort((a, b) => a.time - b.time)
-        .map(file => file.name);
+        STATE.openFiles = await sortFilesByTime(STATE.openFiles)
     } else {
         disableMenuItem(['analyseAll', 'reanalyseAll'])
     }
     // Reset analysis status
     STATE.analysisDone = false;
-    loadAudioFile({ filePath: STATE.openFiles[0] });
+    loadAudioFileSync({ filePath: STATE.openFiles[0] });
     disableMenuItem(['analyseSelection', 'analyse', 'analyseAll', 'reanalyse', 'reanalyseAll', 'save2db'])
     // Clear unsaved records warning
     window.electron.unsavedRecords(false);
@@ -1068,7 +1058,7 @@ const getSelectionResults = (fromDB) => {
     if (fromDB instanceof PointerEvent) fromDB = false;
     let start = region.start + bufferBegin;
     // Remove small amount of region to avoid pulling in results from 'end'
-    let end = region.end + bufferBegin - 0.001;
+    let end = region.end + bufferBegin // - 0.001;
     STATE.selection = {};
     STATE['selection']['start'] = start.toFixed(3);
     STATE['selection']['end'] = end.toFixed(3);
@@ -1090,15 +1080,14 @@ function postAnalyseMessage(args) {
         disableMenuItem(['analyseSelection', 'explore', 'charts']);
         const selection = !!args.end;
         const filesInScope = args.filesInScope;
-        PREDICTING = true;
+        args.fromDB || (PREDICTING = true);
         disableSettingsDuringAnalysis(true)
         if (!selection) {
             analyseReset();
             refreshResultsView();
             resetResults();
             // change result header to indicate deactivation
-            DOM.resultHeader.classList.add('text-bg-secondary');
-            DOM.resultHeader.classList.remove('text-bg-dark');
+            DOM.resultHeader.classList.replace('text-bg-dark', 'text-bg-secondary');
         }
         worker.postMessage({
             action: 'analyse',
@@ -1115,7 +1104,7 @@ function postAnalyseMessage(args) {
 }
 
 let openStreetMapTimer, currentRequest = null;
-async function fetchLocationAddress(lat, lon) {
+async function fetchLocationAddress(lat, lon, pushLocations) {
     const isInvalidLatitude = isNaN(lat) || lat === null || lat < -90 || lat > 90;
     const isInvalidLongitude = isNaN(lon) || lon === null || lon < -180 || lon > 180;
     
@@ -1151,7 +1140,7 @@ async function fetchLocationAddress(lat, lon) {
                 } else {
                     // Just take the first two elements of the address
                     address = data.display_name.split(',').slice(0, 2).join(",").trim();
-                    LOCATIONS.push({ id: LOCATIONS.length + 1, lat: lat, lon: lon, place: address });
+                    pushLocations && LOCATIONS.push({ id: LOCATIONS.length + 1, lat: lat, lon: lon, place: address });
                 }
 
                 resolve(address);
@@ -1209,6 +1198,7 @@ function showElement(id_list, makeFlex = true, empty = false) {
 function hideElement(id_list) {
     id_list.forEach(id => {
         const thisElement = document.getElementById(id);
+        // Don't use replace as d-flex may be absent
         thisElement.classList.remove('d-flex');
         thisElement.classList.add('d-none');
     })
@@ -1328,7 +1318,7 @@ async function showAnalyse() {
                 updateSummary: true });
         } else {
             clearActive();
-            loadAudioFile({filePath: STATE.currentFile});
+            loadAudioFileSync({filePath: STATE.currentFile});
         }
     }
     resetResults();
@@ -1427,7 +1417,7 @@ const loadResultRegion = ({ file = '', start = 0, end = 3, label = '' } = {}) =>
     if (windowLength <= 3.5) windowLength = 6;
     bufferBegin = Math.max(0, start - (windowLength / 2) + 1.5)
     const region = { start: Math.max(start - bufferBegin, 0), end: end - bufferBegin, label: label };
-    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+    const position = wavesurfer? clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1) : 0;
     postBufferUpdate({ file: file, begin: bufferBegin, position: position, region: region })
 }
 
@@ -1454,7 +1444,7 @@ function adjustSpecDims(redraw, fftSamples, newHeight) {
         }
         if (STATE.currentFile) {
             // give the wrapper space for the transport controls and element padding/margins
-            if (!wavesurfer) {
+            if (!wavesurfer || !wavesurfer.isReady) {
                 initWavesurfer({
                     audio: currentBuffer,
                     height: specHeight,
@@ -1474,6 +1464,7 @@ function adjustSpecDims(redraw, fftSamples, newHeight) {
         specOffset = 0
     }
     DOM.resultTableElement.style.height = (contentHeight - specOffset - formOffset) + 'px';
+    STATE.timelineWidth = DOM.specElement.clientWidth;
 }
 
 ///////////////// Font functions ////////////////
@@ -1524,137 +1515,94 @@ function formatRegionTooltip(regionLength, start, end) {
 
 function formatTimeCallback(secs) {
     secs = secs.toFixed(2);
-    const now = new Date(bufferStartTime.getTime() + (secs * 1000))
-    const milliSeconds = now.getMilliseconds();
+    // Add 500 to deal with overflow errors
+    let now = new Date(bufferStartTime.getTime() + (secs * 1000));
+    let milliseconds = now.getMilliseconds();
+    if (milliseconds >949) { 
+        // Deal with overflow errors
+        now = new Date(now.getTime() + 50);
+        milliseconds = 0;
+    }
+    // Extract the components
+    let hours = now.getHours();
+    let minutes = now.getMinutes();
     let seconds = now.getSeconds();
-    const minutes = now.getMinutes();
-    const hours = now.getHours();
-    
-    // fill up seconds with zeroes
-    let secondsStr;
-    if (windowLength >= 5) {
-        secondsStr = (seconds + milliSeconds / 1000).toFixed(2);
-        secondsStr = secondsStr.replace(/\.?0+$/, ''); // remove trailing zeroes
+ 
+    let formattedTime;
+    if (config.timeOfDay) {
+        // Format the time as hh:mm:ss
+        formattedTime = [
+            hours.toString().padStart(2, '0'),
+            minutes.toString().padStart(2, '0'),
+            seconds.toString().padStart(2, '0'),
+        ].join(':');
     } else {
-        let fraction = Math.round(milliSeconds / 100);
-        if (fraction === 10) {
-            seconds += 1;
-            fraction = 0;
+        if (hours === 0 && minutes === 0) {
+            // Format as ss
+            formattedTime = seconds.toString();
+        } else if (hours === 0) {
+            // Format as mm:ss
+            formattedTime = [
+                minutes.toString(),
+                seconds.toString().padStart(2, '0'),
+            ].join(':');
+        } else {
+            // Format as hh:mm:ss
+            formattedTime = [
+                hours.toString(),
+                minutes.toString().padStart(2, '0'),
+                seconds.toString().padStart(2, '0'),
+            ].join(':');
         }
-        secondsStr = seconds.toString() + '.' + fraction.toString();
     }
-    if (hours > 0 || minutes > 0 || config.timeOfDay) {
-        if (seconds < 10) {
-            secondsStr = '0' + secondsStr;
-        }
-    } else if (!config.timeOfDay) {
-        return secondsStr;
+    if (windowLength <= 5) {
+        formattedTime += '.' + milliseconds.toString()
+    } else  {
+        milliseconds = (milliseconds / 1000).toFixed(1);
+        formattedTime += milliseconds.slice(1);
     }
-    let minutesStr = minutes.toString();
-    if (config.timeOfDay || hours > 0) {
-        if (minutes < 10) {
-            minutesStr = '0' + minutesStr;
-        }
-    } else if (!config.timeOfDay) {
-        return `${minutes}:${secondsStr}`
-    }
-    if (hours < 10 && config.timeOfDay) {
-        let hoursStr = '0' + hours.toString();
-        return `${hoursStr}:${minutesStr}:${secondsStr}`
-    }
-    return `${hours}:${minutesStr}:${secondsStr}`
-}
 
+    return formattedTime;
+}
 /**
-* Use timeInterval to set the period between notches, in seconds,
-* adding notches as the number of pixels per second increases.
-*
-* Note that if you override the default function, you'll almost
-* certainly want to override formatTimeCallback, primaryLabelInterval
-* and/or secondaryLabelInterval so they all work together.
-*
-* @param: pxPerSec
-*/
+ * Dynamically calculate the time interval between labels
+ * to ensure there are always 5 labels on the timeline.
+ *
+ * @param {number} pxPerSec - Pixels per second
+ * @returns {number} - Time interval in seconds
+ */
 function timeInterval(pxPerSec) {
-    let retval;
-    const mulFactor = window.devicePixelRatio || 1;
-    const threshold = pxPerSec / mulFactor;
-    if (threshold >= 2500) {
-        retval = 0.01;
-    } else if (threshold >= 1000) {
-        retval = 0.025;
-    } else if (threshold >= 250) {
-        retval = 0.1;
-    } else if (threshold >= 100) {
-        retval = 0.25;
-    } else if (threshold >= 25) {
-        retval = 5;
-    } else if (threshold >= 5) {
-        retval = 10;
-    } else if (threshold >= 2) {
-        retval = 15;
-    } else {
-        retval = Math.ceil(0.5 / threshold) * 60;
-    }
-    return retval;
+    const width = DOM.specElement.clientWidth;
+    const visibleDuration = width / pxPerSec; // Total visible duration in seconds
+    return visibleDuration / 3; // Divide the duration into 5 equal intervals
 }
 
 /**
-* Return the cadence of notches that get labels in the primary color.
-* EG, return 2 if every 2nd notch should be labeled,
-* return 10 if every 10th notch should be labeled, etc.
-*
-* Note that if you override the default function, you'll almost
-* certainly want to override formatTimeCallback, primaryLabelInterval
-* and/or secondaryLabelInterval so they all work together.
-*
-* @param pxPerSec
-*/
+ * Dynamically calculate the interval for primary labels
+ * to ensure they align with the calculated timeInterval.
+ *
+ * @param {number} pxPerSec - Pixels per second
+ * @returns {number} - Number of intervals between primary labels
+ */
 function primaryLabelInterval(pxPerSec) {
-    let retval;
-    const mulFactor = window.devicePixelRatio || 1;
-    const threshold = pxPerSec / mulFactor;
-    if (threshold >= 2500) {
-        retval = 10;
-    } else if (threshold >= 1000) {
-        retval = 4;
-    } else if (threshold >= 250) {
-        retval = 10;
-    } else if (threshold >= 100) {
-        retval = 4;
-    } else if (threshold >= 20) {
-        retval = 1;
-    } else if (threshold >= 5) {
-        retval = 5;
-    } else if (threshold >= 2) {
-        retval = 15;
-    } else {
-        retval = Math.ceil(0.5 / threshold) * 60;
-    }
-    return retval;
+    // In this case, always label every interval
+    return 1;
 }
 
 /**
-* Return the cadence of notches to get labels in the secondary color.
-* EG, return 2 if every 2nd notch should be labeled,
-* return 10 if every 10th notch should be labeled, etc.
-*
-* Secondary labels are drawn after primary labels, so if
-* you want to have labels every 10 seconds and another color labels
-* every 60 seconds, the 60 second labels should be the secondary.
-*
-* Note that if you override the default function, you'll almost
-* certainly want to override formatTimeCallback, primaryLabelInterval
-* and/or secondaryLabelInterval so they all work together.
-*
-* @param pxPerSec
-*/
+ * Secondary labels can be adjusted similarly if needed,
+ * or you can omit them entirely.
+ *
+ * @param {number} pxPerSec - Pixels per second
+ * @returns {number} - Secondary label interval
+ */
 function secondaryLabelInterval(pxPerSec) {
-    const mulFactor = window.devicePixelRatio || 1;
-    const threshold = pxPerSec / mulFactor;
-    // draw one every 1s as an example
-    return Math.floor(1 / timeInterval(threshold));
+    return
+    // const width = DOM.specElement.clientWidth;
+    // const interval = timeInterval(pxPerSec, width);
+    // return .10 //Math.floor(interval/10); // Example: draw one secondary label every half of the primary interval
 }
+
 
 ////////// Store preferences //////////
 
@@ -1704,26 +1652,30 @@ const defaultConfig = {
     speciesThreshold: 0.03,
     useWeek: false,
     model: 'chirpity',
-    chirpity: {locale: 'en_uk', backend: 'tensorflow'},
-    nocmig: {locale: 'en_uk', backend: 'tensorflow'},
-    birdnet: {locale: 'en', backend: 'tensorflow'},
+    locale: 'en',
+    chirpity: {backend: 'tensorflow'},
+    nocmig: {backend: 'tensorflow'},
+    birdnet: {backend: 'tensorflow'},
     latitude: 52.87,
     longitude: 0.89, 
     location: 'Great Snoring, North Norfolk',
     detect: { nocmig: false, contextAware: false, confidence: 45, iucn: true , iucnScope: 'Global'},
-    filters: { active: false, highPassFrequency: 0, lowShelfFrequency: 0, lowShelfAttenuation: 0, SNR: 0, sendToModel: false },
+    filters: { active: false, highPassFrequency: 0, lowShelfFrequency: 0, lowShelfAttenuation: 0, SNR: 0, 
+        normalise: false, sendToModel: false },
     warmup: true,
     hasNode: false,
     tensorflow: { threads: DIAGNOSTICS['Cores'], batchSize: 8 },
     webgpu: { threads: 2, batchSize: 8 },
     webgl: { threads: 2, batchSize: 32 },
     audio: { gain: 0, format: 'mp3', bitrate: 192, quality: 5, downmix: false, padding: false, 
-        fade: false, notification: true, normalise: false, minFrequency: 0, maxFrequency: 11950 },
+        fade: false, notification: true, minFrequency: 0, maxFrequency: 11950 },
     limit: 500,
     debug: false,
     VERSION: VERSION,
     powerSaveBlocker: false,
-    fileStartMtime: false
+    fileStartMtime: false,
+    hideBuyCoffeeWidget: false,
+    forceHideCoffeeReset: true,
 };
 let appPath, tempPath, systemLocale, isMac;
 window.onload = async () => {
@@ -1737,9 +1689,9 @@ window.onload = async () => {
     // Set default locale
     systemLocale = systemLocale.replace('en-GB', 'en_uk');
     systemLocale = systemLocale === 'en_uk' ? systemLocale : systemLocale.slice(0,2).toLowerCase();
-    defaultConfig.chirpity.locale = systemLocale;
-    defaultConfig.birdnet.locale = systemLocale;
-    defaultConfig.nocmig.locale = systemLocale;
+    if (STATE.translations.includes(systemLocale)) {
+        defaultConfig.locale = systemLocale;
+    }
     // establish the message channel
     setUpWorkerMessaging()
 
@@ -1748,13 +1700,18 @@ window.onload = async () => {
     await appVersionLoaded;
     await fs.readFile(p.join(appPath, 'config.json'), 'utf8', (err, data) => {
         if (err) {
-            console.log('JSON parse error ' + err);
+            console.log('Config not loaded, using defaults');
             // Use defaults
             config = defaultConfig;
         } else {
             config = JSON.parse(data);
         }
-        
+        // One-time reset of hidecoffee
+        if (config.forceHideCoffeeReset) {
+            config.hideBuyCoffeeWidget = false;
+            config.forceHideCoffeeReset = false;
+            updatePrefs('config.json', config);
+        }
         // Attach an error event listener to the window object
         window.onerror = function(message, file, lineno, colno, error) {
             trackEvent(config.UUID, 'Error', error.message, encodeURIComponent(error.stack));
@@ -1763,6 +1720,9 @@ window.onload = async () => {
             };
         //fill in defaults - after updates add new items
         syncConfig(config, defaultConfig);
+        // Show Buy Me a Coffee widget?
+        config.hideBuyCoffeeWidget && DOM.buyMeCoffee.classList.add('d-none');
+        document.getElementById('buy-coffee').checked = config.hideBuyCoffeeWidget;
 
         // Disable SNR
         config.filters.SNR = 0;
@@ -1772,7 +1732,7 @@ window.onload = async () => {
         DIAGNOSTICS['UUID'] = config.UUID;
         
         // Initialize Spectrogram
-        initWavesurfer({});
+        //initWavesurfer({});
         // Set UI option state
         // Fontsize
         config.fontScale === 1 || setFontSizeScale(true);
@@ -1788,9 +1748,9 @@ window.onload = async () => {
         // Show the list in use
         DOM.listToUse.value = config.list;
         DOM.localSwitch.checked = config.local;
-
+        config.list === 'custom' && readLabels(config.customListFile[config.model], 'list')
         // Show Locale
-        DOM.locale.value = config[config.model].locale;
+        DOM.locale.value = config.locale;
         LIST_MAP = getI18n(i18nLIST_MAP)
         // Localise UI
         localiseUI(DOM.locale.value).then(result => STATE.i18n = result);
@@ -1832,7 +1792,7 @@ window.onload = async () => {
         // Audio preferences:
         DOM.gain.value = config.audio.gain;
         DOM.gainAdjustment.textContent = config.audio.gain + 'dB';
-        DOM.normalise.checked = config.audio.normalise;
+        DOM.normalise.checked = config.filters.normalise;
         DOM.audioFormat.value = config.audio.format;
         DOM.audioBitrate.value = config.audio.bitrate;
         DOM.audioQuality.value = config.audio.quality;
@@ -1852,11 +1812,11 @@ window.onload = async () => {
         contextAwareIconDisplay();
         DOM.debugMode.checked = config.debug;
         showThreshold(config.detect.confidence);
-        SNRSlider.value = config.filters.SNR;
-        SNRThreshold.textContent = config.filters.SNR;
-        if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
-            SNRSlider.disabled = true;
-        };
+        // SNRSlider.value = config.filters.SNR;
+        // SNRThreshold.textContent = config.filters.SNR;
+        // if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
+        //     SNRSlider.disabled = true;
+        // };
         
         
         // Filters
@@ -1868,10 +1828,16 @@ window.onload = async () => {
         lowShelfAttenuationThreshold.textContent = lowShelfAttenuation.value + 'dB';
         DOM.sendFilteredAudio.checked = config.filters.sendToModel;
         filterIconDisplay();
+        if (config[config.model].backend.includes('web')){
+            // Force max three threads to prevent severe memory issues
+            config[config[config.model].backend].threads = Math.min(config[config[config.model].backend].threads, 3);
+            DOM.threadSlider.max = 3;
+        } else {
+            DOM.threadSlider.max = DIAGNOSTICS['Cores'];
+        }
         
-        DOM.threadSlider.max = DIAGNOSTICS['Cores'];
         DOM.threadSlider.value = config[config[config.model].backend].threads;
-        DOM.numberOfThreads.textContent = config[config[config.model].backend].threads;
+        DOM.numberOfThreads.textContent = DOM.threadSlider.value;
         DOM.defaultLat.value = config.latitude;
         DOM.defaultLon.value = config.longitude;
         place.innerHTML = '<span class="material-symbols-outlined">fmd_good</span>' + config.location;
@@ -1883,7 +1849,7 @@ window.onload = async () => {
             autoArchive.checked = config.archive.auto;
 
         }
-        //setListUIState(config.list);
+        setListUIState(config.list);
         worker.postMessage({
             action: 'update-state',
             archive: config.archive,
@@ -1896,7 +1862,7 @@ window.onload = async () => {
             filters: config.filters,
             audio: config.audio,
             limit: config.limit,
-            locale: config[config.model].locale,
+            locale: config.locale,
             speciesThreshold: config.speciesThreshold,
             list: config.list,
             useWeek: config.useWeek,
@@ -1976,13 +1942,14 @@ const setUpWorkerMessaging = () => {
                         clearTimeout(loadingTimeout)
                         DOM.loading.classList.add('d-none')
                         MISSING_FILE = args.file;
-                        args.message += `
+                        const i18n = getI18n(i18nLocate);
+                        args.locate = `
                             <div class="d-flex justify-content-center mt-2">
                                 <button id="locate-missing-file" class="btn btn-primary border-dark text-nowrap" style="--bs-btn-padding-y: .25rem;" type="button">
-                                    Locate File
+                                    ${i18n.locate}
                                 </button>
                                 <button id="purge-from-toast" class="ms-3 btn btn-warning text-nowrap" style="--bs-btn-padding-y: .25rem;" type="button">
-                                    Remove from Archive
+                                ${i18n.remove}
                                 </button>
                             </div>
                             `
@@ -1995,19 +1962,28 @@ const setUpWorkerMessaging = () => {
                 case "database-results-complete": {onResultsComplete(args);
                     break }
                 case "labels": { 
-                    LABELS = args.labels; 
-                    /* Code below to retrieve Red list data
-                    for (let i = 0;i< LABELS.length; i++){
-                        const label = LABELS[i];
-                        const sname = label.split('_')[0];
-                        if (! STATE.IUCNcache[sname]) { 
-                            await getIUCNStatus(sname)
-                            await new Promise(resolve => setTimeout(resolve, 300))
+                        LABELS = args.labels; 
+                        /* Code below to retrieve Red list data
+                        for (let i = 0;i< LABELS.length; i++){
+                            const label = LABELS[i];
+                            const sname = label.split('_')[0];
+                            if (! STATE.IUCNcache[sname]) { 
+                                await getIUCNStatus(sname)
+                                await new Promise(resolve => setTimeout(resolve, 300))
+                            }
                         }
+                        */
+                    break }
+                case 'label-translation-needed': {
+                    // Called when the initial system locale isn't english
+                    const locale = args.locale;
+                    let labelFile;
+                    if (config.list === "custom"){
+                        labelFile = config.customListFile[config.model]; 
+                    } else {
+                        labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_Labels_${locale}.txt`; 
                     }
-                    */
-                    // Read a custom list if applicable
-                    config.list === 'custom' && setListUIState(config.list);
+                    readLabels(labelFile);
                     break }
                 case "location-list": {LOCATIONS = args.locations;
                     locationID = args.currentLocation;
@@ -2032,14 +2008,12 @@ const setUpWorkerMessaging = () => {
                     if (['archive', 'explore'].includes(mode)) {
                         enableMenuItem(['purge-file']);
                         // change header to indicate activation
-                        DOM.resultHeader.classList.remove('text-bg-secondary');
-                        DOM.resultHeader.classList.add('text-bg-dark');
+                        DOM.resultHeader.classList.replace('text-bg-secondary', 'text-bg-dark');
                         //adjustSpecDims(true)
                     } else {
                         disableMenuItem(['purge-file']);
                         // change header to indicate deactivation
-                        DOM.resultHeader.classList.add('text-bg-secondary');
-                        DOM.resultHeader.classList.remove('text-bg-dark');   
+                        DOM.resultHeader.classList.replace('text-bg-dark', 'text-bg-secondary');
                     }
                     break }
                 case "summary-complete": {onSummaryComplete(args);
@@ -2119,30 +2093,27 @@ function generateBirdList(store, rows) {
 function generateBirdOptionList({ store, rows, selected }) {
     let listHTML = '';
     const i18n = getI18n(i18nHeadings);
+    const i18nTout = getI18n(i18nAll);
     if (store === 'allSpecies') {
         let sortedList = LABELS.map(label => label.split('_')[1]);
         
         // International language sorting, recommended for large arrays - 'en_uk' not valid, but same as 'en'
-        sortedList.sort(new Intl.Collator(config[config.model].locale.replace(/_.*$/, '')).compare);
+        sortedList.sort(new Intl.Collator(config.locale.replace(/_.*$/, '')).compare);
         // Check if we have prepared this before
         
         const lastSelectedSpecies = selected || STATE.birdList.lastSelectedSpecies;
         listHTML += '<div class="form-floating"><select spellcheck="false" id="bird-list-all" class="input form-select mb-3" aria-label=".form-select" required>';
-        listHTML += '<option value="">All</option>';
-        for (const item in sortedList) {
-            //const [sname, cname] = labels[item].split('_');
-            if (sortedList[item] !== lastSelectedSpecies) {
-                listHTML += `<option value="${sortedList[item]}">${sortedList[item]}</option>`;
-            } else {
-                listHTML += `<option value="${sortedList[item]}" selected>${sortedList[item]}</option>`;
-            }
-        }
+        listHTML += `<option value="">${i18nTout[1]}</option>`;
+        for (const species of sortedList) {
+            const isSelected = species === lastSelectedSpecies ? 'selected' : '';
+            listHTML += `<option value="${species}" ${isSelected}>${species}</option>`;
+        }       
         listHTML += `</select><label for="bird-list-all">${i18n.species[0]}</label></div>`;
     } else {
-        listHTML += '<select id="bird-list-seen" class="form-select"><option value="">All</option>';
-        for (const item in rows) {
-            const isSelected = rows[item].cname === STATE.chart.species ? 'selected' : '';
-            listHTML += `<option value="${rows[item].cname}" ${isSelected}>${rows[item].cname}</option>`;
+        listHTML += `<select id="bird-list-seen" class="form-select"><option value="">${i18nTout[1]}</option>`;
+        for (const {cname} of rows) {
+            const isSelected = cname === STATE.chart.species ? 'selected' : '';
+            listHTML += `<option value="${cname}" ${isSelected}>${cname}</option>`;
         }
         listHTML += `</select><label for="bird-list-seen">${i18n.species[0]}</label>`;
     }
@@ -2189,13 +2160,18 @@ function getSpecies(target) {
 }
 
 function handleGesture(e) {
+    const currentTime = Date.now();
+    if (currentTime - STATE.lastGestureTime < 1200) {
+        return; // Ignore successive events within 1.2 second
+    }
+    STATE.lastGestureTime = currentTime;
         const moveDirection = e.deltaX || e.deltaY; // If deltaX is 0, use deltaY
         const key = moveDirection > 0 ? 'PageDown'  : 'PageUp';
         config.debug && console.log(`scrolling x: ${e.deltaX} y: ${e.deltaY}`)
-        waitForFinalEvent(() => {
+        // waitForFinalEvent(() => {
             GLOBAL_ACTIONS[key](e);
             trackEvent(config.UUID, 'Swipe', key, '' );
-        }, 200, 'swipe');
+        // }, 200, 'swipe');
 }
 
 
@@ -2545,7 +2521,7 @@ function onChartData(args) {
         }, 100, 'id1');
     });
     
-    const contextMenu = document.getElementById('context-menu')
+    
     
     function handleKeyDownDeBounce(e) {
         e.preventDefault();
@@ -2558,7 +2534,7 @@ function onChartData(args) {
         let action = e.key;
         config.debug && console.log(`${action} key pressed`);
         if (action in GLOBAL_ACTIONS) {
-            contextMenu.classList.add("d-none");
+            DOM.contextMenu.classList.add("d-none");
             if (document === e.target || document.body === e.target || e.target.attributes["data-action"]) {}
             const modifier = e.shiftKey ? 'Shift' : e.ctrlKey ? 'Control' : e.metaKey ? 'Alt' : 'no';
             trackEvent(config.UUID, 'KeyPress', action, modifier );
@@ -2571,17 +2547,19 @@ function onChartData(args) {
     ///////////// Nav bar Option handlers //////////////
     
     function initRegion() {
-        if (wavesurfer.regions) wavesurfer.destroyPlugin('regions');
-        wavesurfer.addPlugin(WaveSurfer.regions.create({
-            formatTimeCallback: () => '',
-            dragSelection: true,
-            maxRegions: 1,
-            // Region length bug (likely mine) means I don't trust lengths > 60 seconds
-            //maxLength: config[config[config.model].backend].batchSize * 3,
-            slop: null,
-            color: "rgba(255, 255, 255, 0.2)"
-        })
-        ).initPlugin('regions')
+        if (wavesurfer) {
+            if (wavesurfer.regions) wavesurfer.destroyPlugin('regions');
+            wavesurfer.addPlugin(WaveSurfer.regions.create({
+                formatTimeCallback: () => '',
+                dragSelection: true,
+                maxRegions: 1,
+                // Region length bug (likely mine) means I don't trust lengths > 60 seconds
+                //maxLength: config[config[config.model].backend].batchSize * 3,
+                slop: null,
+                color: "rgba(255, 255, 255, 0.2)"
+            })
+            ).initPlugin('regions')
+        }
     }
     
     function initSpectrogram(height, fftSamples) {
@@ -2652,11 +2630,15 @@ function onChartData(args) {
     }
 
     const updateListIcon = () => {
+        LIST_MAP = getI18n(i18nLIST_MAP);
+        DOM.listIcon.style.visibility = 'hidden';
         DOM.listIcon.innerHTML = config.list === 'custom' ?
             `<span class="material-symbols-outlined mt-1" title="${LIST_MAP[config.list]}" style="width: 30px">fact_check</span>` :
             `<img class="icon" src="img/${config.list}.png" alt="${config.list}"  title="${LIST_MAP[config.list]}">`;
-
+            DOM.listIcon.style.visibility = 'visible';
     }
+
+
     DOM.listIcon.addEventListener('click', () => {
         if (PREDICTING){
             generateToast({message: 'changeListBlocked', type:'warning'})
@@ -2669,10 +2651,9 @@ function onChartData(args) {
         DOM.listToUse.value = config.list;
         updateListIcon();
         updatePrefs('config.json', config)
-        resetResults();
+        //resetResults();
         setListUIState(config.list);
-        // Since the custom list function calls for its own update *after* reading the labels, we'll skip updates for custom lists here
-        config.list === 'custom' || updateList()
+        updateList()
     })
     
     DOM.customListSelector.addEventListener('click', async () =>{
@@ -2682,7 +2663,7 @@ function onChartData(args) {
             const customListFile = files.filePaths[0];
             config.customListFile[config.model] = customListFile;
             DOM.customListFile.value = customListFile;
-            readLabels(config.customListFile[config.model], 'list');
+            readLabels(customListFile, 'list');
             LIST_MAP = getI18n(i18nLIST_MAP);
             updatePrefs('config.json', config)
         }
@@ -2705,32 +2686,35 @@ function onChartData(args) {
     }
     
     const handleBackendChange = (backend) => {
-        config[config.model].backend = backend instanceof Event ? backend.target.value : backend;
-        const backendEL = document.getElementById(config[config.model].backend);
+        backend = backend instanceof Event ? backend.target.value : backend;
+        config[config.model].backend = backend;
+        const backendEL = document.getElementById(backend);
         backendEL.checked = true;
-        if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
-            SNRSlider.disabled = true;
-            config.filters.SNR = 0;
+        if (backend === 'webgl' || backend === 'webgpu') {
+            DOM.threadSlider.max = 3;
+            // SNRSlider.disabled = true;
+            // config.filters.SNR = 0;
         } else {
+            DOM.threadSlider.max = DIAGNOSTICS['Cores'];
             DOM.contextAware.disabled = false;
             if (DOM.contextAware.checked) {
                 config.detect.contextAware = true;
-                SNRSlider.disabled = true;
-                config.filters.SNR = 0;
+                // SNRSlider.disabled = true;
+                // config.filters.SNR = 0;
             } else {
-                SNRSlider.disabled = false;
-                config.filters.SNR = parseFloat(SNRSlider.value);
-                if (config.filters.SNR) {
-                    DOM.contextAware.disabled = true;
-                    config.detect.contextAware = false;
-                    contextAwareIconDisplay();
-                }
+                // SNRSlider.disabled = false;
+                // config.filters.SNR = parseFloat(SNRSlider.value);
+                // if (config.filters.SNR) {
+                //     DOM.contextAware.disabled = true;
+                //     config.detect.contextAware = false;
+                //     contextAwareIconDisplay();
+                // }
             }
         }
         // Update threads and batch Size in UI
-        DOM.threadSlider.value = config[config[config.model].backend].threads;
-        DOM.numberOfThreads.textContent = config[config[config.model].backend].threads;
-        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[config[config.model].backend].batchSize);
+        DOM.threadSlider.value = config[backend].threads;
+        DOM.numberOfThreads.textContent = config[backend].threads;
+        DOM.batchSizeSlider.value = BATCH_SIZE_LIST.indexOf(config[backend].batchSize);
         DOM.batchSizeValue.textContent = BATCH_SIZE_LIST[DOM.batchSizeSlider.value].toString();
         updatePrefs('config.json', config)
         // restart wavesurfer regions to set new maxLength
@@ -2799,9 +2783,9 @@ function centreSpec(){
                 centreSpec();
             }
         },
-        D: function (e) {
-            if (( e.ctrlKey || e.metaKey)) worker.postMessage({ action: 'create-dataset' });
-        },
+        // D: function (e) {
+        //     if (( e.ctrlKey || e.metaKey)) worker.postMessage({ action: 'create-dataset' });
+        // },
         e: function (e) {
             if (( e.ctrlKey || e.metaKey) && region) exportAudio();
         },
@@ -3022,6 +3006,9 @@ function centreSpec(){
     const goto = new bootstrap.Modal(document.getElementById('gotoModal'));
     const showGoToPosition = () => {
         if (STATE.currentFile) {
+            const gotoLabel = document.getElementById('gotoModalLabel')
+            const timeHeading = config.timeOfDay ? getI18n(i18nContext).gotoTimeOfDay : getI18n(i18nContext).gotoPosition;
+            gotoLabel.textContent = timeHeading;
             goto.show();
         }
     }
@@ -3039,35 +3026,46 @@ function centreSpec(){
     const gotoTime = (e) => {
         if (STATE.currentFile) {
             e.preventDefault();
-            let hours = 0, minutes = 0, seconds = 0;
             const time = document.getElementById('timeInput').value;
-            let timeArray = time.split(':');
-            if (timeArray.length === 1 && !isNaN(parseFloat(timeArray[0]))) {
-                seconds = parseFloat(timeArray[0]);
-            } else if (timeArray.length === 2 && !isNaN(parseInt(timeArray[0])) && !isNaN(parseInt(timeArray[1]))) {
-                // Case 2: Input is two numbers separated by a colon, take as minutes and seconds
-                minutes = Math.min(parseInt(timeArray[0]), 59);
-                seconds = Math.min(parseFloat(timeArray[1]), 59.999);
-            } else if (timeArray.length === 3 && !isNaN(parseInt(timeArray[0])) && !isNaN(parseInt(timeArray[1])) && !isNaN(parseInt(timeArray[2]))) {
-                // Case 3: Input is three numbers separated by colons, take as hours, minutes, and seconds
-                hours = Math.min(parseInt(timeArray[0]), 23);
-                minutes = Math.min(parseInt(timeArray[1]), 59);
-                seconds = Math.min(parseFloat(timeArray[2]), 59.999);
-            } else {
-                // Invalid input
-                generateToast({type: 'warning',  message:'badTime'});
+            // Nothing entered?
+            if (!time){
+                // generateToast({type: 'warning',  message:'badTime'});
                 return;
             }
-            let start = hours * 3600 + minutes * 60 + seconds;
+            let [hours, minutes, seconds] = time.split(':').map(Number);
+            hours ??= 0; minutes??= 0; seconds??= 0;
+            let  initialTime, start;
+            if(config.timeOfDay){
+                initialTime =  new Date(STATE.fileStart)
+                // Create a Date object for the input time on the same day as the file start
+                const inputDate = new Date(
+                    initialTime.getFullYear(),
+                    initialTime.getMonth(),
+                    initialTime.getDate(),
+                    hours,
+                    minutes,
+                    seconds
+                );
+                // Calculate the offset in milliseconds
+                const offsetMillis = inputDate - STATE.fileStart;
+                start = offsetMillis / 1000;
+                //if we move to a new day... add 24 hours
+                start += start < 0 ? 86400 : 0;
+            } else {
+                start = hours * 3600 + minutes * 60 + seconds;
+            }
             windowLength = 20;
+
+            start = Math.min(start, currentFileDuration);
             bufferBegin = Math.max(start - windowLength / 2, 0);
-            const position = bufferBegin === 0 ? start / windowLength : 0.5;
+            const position = start === 0 ? 0 : 0.5;
             postBufferUpdate({ begin: bufferBegin, position: position })
             // Close the modal
             goto.hide()
         }
     }
-    
+
+
     const gotoForm = document.getElementById('gotoForm')
     gotoForm.addEventListener('submit', gotoTime)
     
@@ -3100,12 +3098,11 @@ function centreSpec(){
     let NEXT_BUFFER;
     async function onWorkerLoadedAudio({
         location,
-        start = 0,
-        sourceDuration = 0,
-        fileBegin = 0,
+        fileStart = 0,
+        fileDuration = 0,
+        windowBegin = 0,
         file = '',
         position = 0,
-        buffer = undefined,
         contents = undefined,
         fileRegion = undefined,
         play = false,
@@ -3118,43 +3115,35 @@ function centreSpec(){
         // Clear the loading animation
         DOM.loading.classList.add('d-none');
         const resetSpec = !STATE.currentFile;
-        currentFileDuration = sourceDuration;
+        currentFileDuration = fileDuration;
         //if (preserveResults) completeDiv.hide();
-        console.log(`UI received worker-loaded-audio: ${file}, buffered: ${contents === undefined}`);
-        if (contents) {
-            currentBuffer = new AudioBuffer({ length: contents.length, numberOfChannels: 1, sampleRate: sampleRate });
-            currentBuffer.copyToChannel(contents, 0);
-        } else {
-            currentBuffer = buffer;
-        }
+        console.log(`UI received worker-loaded-audio: ${file}, buffered: ${queued === true}`);
         if (queued) {
             // Prepare arguments to call this function with
             NEXT_BUFFER = {
-                start: start, sourceDuration: sourceDuration, bufferBegin: fileBegin, file: file,
-                buffer: currentBuffer, play: true, resetSpec: false, queued: false
+                fileStart, fileDuration, windowBegin, file,
+                contents, play: true, resetSpec: false, queued: false
             }
         } else {
+            // Dismiss a context menu if it's open
+            DOM.contextMenu.classList.add("d-none");
+            currentBuffer = new AudioBuffer({ length: contents.length, numberOfChannels: 1, sampleRate: sampleRate });
+            currentBuffer.copyToChannel(contents, 0);
+            STATE.fileStart = fileStart;
             locationID = location;
-            bufferBegin = fileBegin;
+            bufferBegin = windowBegin;
             NEXT_BUFFER = undefined;
             if (STATE.currentFile !== file) {
                 STATE.currentFile = file;
-
-                fileStart = start;
                 fileEnd = new Date(fileStart + (currentFileDuration * 1000));
+                STATE.metadata[STATE.currentFile] = metadata;
+                renderFilenamePanel();
             }
-            
-            STATE.metadata[STATE.currentFile] = metadata;
-            renderFilenamePanel();
 
-            if (config.timeOfDay) {
-                bufferStartTime = new Date(fileStart + (fileBegin * 1000))
-            } else {
-                const zero = new Date(0,0,0, 0, 0, 0, 0);
-                bufferStartTime = new Date(zero.getTime() + (fileBegin * 1000))
-            }
-            if (windowLength > currentFileDuration) windowLength = currentFileDuration;
+            const initialTime = config.timeOfDay ? new Date(fileStart) : new Date(0, 0, 0, 0, 0, 0, 0);
+            bufferStartTime = new Date(initialTime.getTime() + (windowBegin * 1000));
             
+            if (windowLength > currentFileDuration) windowLength = currentFileDuration;
             
             updateSpec({ buffer: currentBuffer, position: position, play: play, resetSpec: resetSpec });
             wavesurfer.bufferRequested = false;
@@ -3221,8 +3210,9 @@ function centreSpec(){
     const updateSummary = async ( { summary = [], filterSpecies = '' }) => {
         const i18n = getI18n(i18nHeadings);
         const showIUCN = config.detect.iucn;
-        if (summary.length){
-            let summaryHTML = `<table id="resultSummary" class="table table-dark p-1"><thead>
+        // if (summary.length){
+            let summaryHTML = `
+            <table id="resultSummary" class="table table-dark p-1"><thead>
             <tr class="pointer col-auto">
             <th id="summary-max" scope="col"><span id="summary-max-icon" class="text-muted material-symbols-outlined summary-sort-icon d-none">sort</span>${i18n.max}</th>
             <th id="summary-cname" scope="col"><span id="summary-cname-icon" class="text-muted material-symbols-outlined summary-sort-icon d-none">sort</span>${i18n.species[0]}</th>
@@ -3260,17 +3250,28 @@ function centreSpec(){
             }
             summaryHTML += '</tbody></table>';
             // Get rid of flicker...
-            const old_summary = summaryTable;
-            const buffer = old_summary.cloneNode();
-            buffer.innerHTML = summaryHTML;
-            old_summary.replaceWith(buffer);
+            const old_summary = DOM.summaryTable;
+            const fragment = document.createDocumentFragment(); // Create a document fragment
+            const tempDiv = document.createElement('div'); // Temporary container for parsing
+
+            // Parse the new HTML into DOM nodes
+            tempDiv.innerHTML = summaryHTML;
+
+            // Move parsed child nodes into the fragment
+            Array.from(tempDiv.childNodes).forEach(node => fragment.appendChild(node));
+
+            // Replace the contents of the #summaryTable
+            old_summary.replaceChildren(); // Clear existing children
+
+            old_summary.appendChild(fragment);
+
             showSummarySortIcon();
             // scroll to the selected species
             if (selectedRow){
                 const table = document.getElementById('resultSummary');
-                table.rows[selectedRow].scrollIntoView({ behavior: 'instant', block: 'center' });
+                table.rows[selectedRow].scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-        }
+        // }
     }
     
     /*
@@ -3279,7 +3280,8 @@ function centreSpec(){
     function onResultsComplete({active = undefined, select = undefined} = {}){
         PREDICTING = false;
         disableSettingsDuringAnalysis(false)
-        DOM.resultTable.replaceWith(resultsBuffer);
+        DOM.resultTable.replaceWith(resultsBuffer.cloneNode(true));
+        resultsBuffer.textContent = ''
         const table = DOM.resultTable;
         showElement(['resultTableContainer', 'resultsHead'], false);
         // Set active Row        
@@ -3306,7 +3308,7 @@ function centreSpec(){
         
         if (activeRow) {
             activeRow.click();
-            activeRow.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+            activeRow.scrollIntoView({ behavior: 'instant', block: 'center' });
         }
         // hide progress div
         DOM.progressDiv.classList.add('invisible');
@@ -3486,7 +3488,11 @@ function formatDuration(seconds){
                 selectionTable.textContent = '';
             }
             else {
+                // if (!isFromDB) {
+                //     resetResults({clearResults: false, clearSummary: false, clearPagination: false});
+                // }
                 const i18n = getI18n(i18nHeadings);
+                // const fragment = new DocumentFragment();
                 DOM.resultHeader.innerHTML =`
                 <tr>
                     <th id="sort-time" class="time-sort col text-start timeOfDay" title="${i18n.time[1]}"><span class="text-muted material-symbols-outlined time-sort-icon d-none">sort</span> ${i18n.time[0]}</th>
@@ -3494,11 +3500,13 @@ function formatDuration(seconds){
                     <th id="confidence-sort" class="text-start" title="${i18n.species[1]}"><span class="text-muted material-symbols-outlined species-sort-icon d-none">sort</span> ${i18n.species[0]}</th>
                     <th class="text-end">${i18n.calls}</th>
                     <th class="col">${i18n.label}</th>
-                    <th class="col text-end">${i18n.notes}</th>
+                    <th id="notes" class="col text-end">${i18n.notes}</th>
                 </tr>`;
                 setTimelinePreferences();
-                showElement(['resultTableContainer', 'resultsHead'], false);
+                // DOM.resultHeader.innerHTML = fragment;
+
             }
+            showElement(['resultTableContainer', 'resultsHead'], false);
         }  else if (!isFromDB && index % (config.limit + 1) === 0) {
             addPagination(index, 0)
         }
@@ -3529,8 +3537,8 @@ function formatDuration(seconds){
             // store result for feedback function to use
             if (!selection) predictions[index] = result;
             // Format date and position for  UI
-            const tsArray = new Date(timestamp).toString().split(' ');
-            const UI_timestamp = `${tsArray[2]} ${tsArray[1]} ${tsArray[3].substring(2)}<br/>${tsArray[4]}`;
+            const date = new Date(timestamp);
+            const UI_timestamp = date.toLocaleString(undefined, STATE.dataForatOptions);            
             const spliceStart = position < 3600 ? 14 : 11;
             const UI_position = new Date(position * 1000).toISOString().substring(spliceStart, 19);
             const showTimeOfDay = config.timeOfDay ? '' : 'd-none';
@@ -3538,9 +3546,9 @@ function formatDuration(seconds){
             const activeTable = active ? 'table-active' : '';
             const labelHTML = label ? tags[label] : '';
             const hide = selection ? 'd-none' : '';
-            const countIcon = count > 1 ? `<span class="circle pointer" title="Click to view the ${count} detections at this timecode">${count}</span>` : '';
+            const countIcon = count > 1 ? `<span class="circle" title="Click to view the ${count} detections at this timecode">${count}</span>` : '';
             tr += `<tr tabindex="-1" id="result${index}" name="${file}|${position}|${end || position + 3}|${sname}|${cname}${isUncertain}" class='${activeTable} border-top border-2 border-secondary ${dayNight}'>
-            <td class='text-start text-nowrap timeOfDay ${showTimeOfDay}'>${UI_timestamp}</td>
+            <td class='text-start timeOfDay ${showTimeOfDay}'>${UI_timestamp}</td>
             <td class="text-start timestamp ${showTimestamp}">${UI_position} </td>
             <td name="${cname}" class='text-start cname'>
             <span class="cname">${cname}</span> ${countIcon} ${iconizeScore(score)}
@@ -3692,7 +3700,7 @@ function formatDuration(seconds){
                 start = 0;
                 end = currentBuffer.duration;
             }
-            const dateArray = new Date(fileStart + (start * 1000)).toString().split(' ');
+            const dateArray = new Date(STATE.fileStart + (start * 1000)).toString().split(' ');
             const dateString = dateArray.slice(0, 5).join(' ');
             filename = dateString + '.' + config.audio.format;
         }
@@ -3820,20 +3828,13 @@ function formatDuration(seconds){
 
     const populateHelpModal = async (file, label) => {
         document.getElementById('helpModalLabel').textContent = label;
-        let locale = config[config.model].locale;
-        const translations = ['en', 'da', 'de', 'es', 'fr', 'nl', 'pt', 'ru', 'sv', 'zh'];
-        locale = translations.includes(locale) ? locale : 'en';
+        let locale = config.locale;
+        locale = STATE.translations.includes(locale) ? locale : 'en';
         const response = await localiseModal(file, locale)
         document.getElementById('helpModalBody').innerHTML = response;
         const help = new bootstrap.Modal(document.getElementById('helpModal'));
         document.removeEventListener('show.bs.modal', replaceCtrlWithCommand);
         document.addEventListener('show.bs.modal', replaceCtrlWithCommand);
-        const close = {
-            da: 'Luk', de: 'Schließen', en: 'Close', es: 'Cerrar',
-            fr: 'Fermer', nl: 'Sluiten', pt: 'Fechar', ru: 'Закрыть',
-            sv: 'Stäng',  zh: '关闭'            
-          }
-        document.getElementById('help-modal-close').innerText = close[locale];
         help.show();
     }
 
@@ -3965,7 +3966,7 @@ function formatDuration(seconds){
         });
         updatePrefs('config.json', config)
         if (STATE.analysisDone){
-        resetResults({clearSummary: true, clearPagination: true, clearResults: false});
+        resetResults({clearSummary: false, clearPagination: true, clearResults: false});
         filterResults()
         }
     }
@@ -3981,28 +3982,34 @@ function formatDuration(seconds){
         })
     }
     const modelSettingsDisplay = () => {
-        const chirpityOnly = document.querySelectorAll('.chirpity-only');
+        // Sets system options according to model or machine cababilities
+        // cf. setListUIState
+        const chirpityOnly = document.querySelectorAll('.chirpity-only, .chirpity-only-visible');
         const noMac = document.querySelectorAll('.no-mac');
         const nodeOnly = document.querySelectorAll('.node-only');
         if (config.model === 'birdnet'){
             // hide chirpity-only features
-            chirpityOnly.forEach(element => element.classList.add('d-none'));
-            if (config.list === 'nocturnal')  {
-                DOM.localSwitchContainer.classList.remove('d-none');
-            }
+            chirpityOnly.forEach(element => {
+                // element.classList.add('chirpity-only');
+                element.classList.replace('chirpity-only-visible', 'chirpity-only')
+        });
             DOM.contextAware.checked = false;
             DOM.contextAware.disabed = true;
             config.detect.contextAware = false;
-            SNRSlider.disabled = true;
-            config.filters.SNR = 0;
+            DOM.contextAwareIcon.classList.add('d-none')
+
+            // SNRSlider.disabled = true;
+            // config.filters.SNR = 0;
         } else {
             // show chirpity-only features
-            chirpityOnly.forEach(element => element.classList.remove('d-none'));
+            chirpityOnly.forEach(element => {
+                element.classList.replace('chirpity-only','chirpity-only-visible')
+        });
             // Remove GPU option on Mac
             isMac && noMac.forEach(element => element.classList.add('d-none'));
             DOM.contextAware.checked = config.detect.contextAware;
-            DOM.localSwitchContainer.classList.add('d-none');
-            SNRSlider.disabled = false;
+            DOM.contextAwareIcon.classList.remove('d-none')
+            // SNRSlider.disabled = false;
             if (config.hasNode){
                 nodeOnly.forEach(element => element.classList.remove('d-none'));
             } else {
@@ -4041,13 +4048,13 @@ function formatDuration(seconds){
         if (config.model !== 'birdnet') config.detect.contextAware = !config.detect.contextAware;
         DOM.contextAware.checked = config.detect.contextAware;
         contextAwareIconDisplay();
-        if (config.detect.contextAware) {
-            SNRSlider.disabled = true;
-            config.filters.SNR = 0;
-        } else if (config[config.model].backend !== 'webgl'  && config.model !== 'birdnet') {
-            SNRSlider.disabled = false;
-            config.filters.SNR = parseFloat(SNRSlider.value);
-        }
+        // if (config.detect.contextAware) {
+        //     SNRSlider.disabled = true;
+        //     config.filters.SNR = 0;
+        // } else if (config[config.model].backend !== 'webgl'  && config.model !== 'birdnet') {
+        //     SNRSlider.disabled = false;
+        //     config.filters.SNR = parseFloat(SNRSlider.value);
+        // }
         worker.postMessage({
             action: 'update-state',
             detect: { contextAware: config.detect.contextAware },
@@ -4056,12 +4063,6 @@ function formatDuration(seconds){
         updatePrefs('config.json', config)
     }
 
-    
-    DOM.debugMode.addEventListener('click', () =>{
-        config.debug = !config.debug;
-        DOM.debugMode.checked = config.debug;
-        updatePrefs('config.json', config)
-    })
     
 
     
@@ -4099,36 +4100,50 @@ function formatDuration(seconds){
         const timeHeadings = document.getElementsByClassName('time-sort-icon');
         const speciesHeadings = document.getElementsByClassName('species-sort-icon');
         const sortOrderScore = STATE.resultsSortOrder.includes('score');
-        
+        const fragment = document.createDocumentFragment();
+    
+        // Clone the result header and work on it in the fragment
+        const resultHeaderClone = DOM.resultHeader.cloneNode(true);
+        fragment.appendChild(resultHeaderClone);
+    
+        // Update time sort icons
         [...timeHeadings].forEach(heading => {
             heading.classList.toggle('d-none', sortOrderScore);
             heading.parentNode.classList.add('pointer');
         });
-        
+    
+        // Update species sort icons
         [...speciesHeadings].forEach(heading => {
             heading.classList.toggle('d-none', !sortOrderScore);
             heading.parentNode.classList.add('pointer');
-            if (sortOrderScore && STATE.resultsSortOrder.includes('ASC')){
-                // Flip the sort icon
-                heading.classList.add('flipped')
+            if (sortOrderScore && STATE.resultsSortOrder.includes('ASC')) {
+                heading.classList.add('flipped');
             } else {
-                heading.classList.remove('flipped')
+                heading.classList.remove('flipped');
             }
         });
-
-
+    
         // Add pointer icon to species summaries
         const summarySpecies = DOM.summaryTable.querySelectorAll('.cname');
-        summarySpecies.forEach(row => row.classList.add('pointer'))
-        // change results header to indicate activation
-        DOM.resultHeader.classList.remove('text-bg-secondary');
-        DOM.resultHeader.classList.add('text-bg-dark');
-        // Add a hover to summary to indicate activation
+        summarySpecies.forEach(row => row.classList.add('pointer'));
+    
+        // Update the cloned result header's classes
+        resultHeaderClone.classList.replace('text-bg-secondary', 'text-bg-dark');
+    
+        // Add hover to the summary
         const summary = document.getElementById('resultSummary');
-        // If there were no results, there'll be no summary
-        summary?.classList.add('table-hover');
-        showSummarySortIcon()
+        if (summary) {
+            const summaryClone = summary.cloneNode(true);
+            summaryClone.classList.add('table-hover');
+            fragment.appendChild(summaryClone);
+        }
+    
+        // Replace the old header with the updated one
+        DOM.resultHeader.replaceWith(resultHeaderClone);
+    
+        showSummarySortIcon();
     }
+    
     
 function showSummarySortIcon(){
     const [column, direction] = STATE.summarySortOrder.split(' ');
@@ -4144,12 +4159,12 @@ function showSummarySortIcon(){
     }
 }
 
-    const setSortOrder = (order) => {
-        STATE.resultsSortOrder = order;
-        worker.postMessage({ action: 'update-state', resultsSortOrder: order })
-        resetResults({clearSummary: false, clearPagination: false, clearResults: true});
-        filterResults();
-    }
+const setSortOrder = (order) => {
+    STATE.resultsSortOrder = order;
+    worker.postMessage({ action: 'update-state', resultsSortOrder: order })
+    // resetResults({clearSummary: false, clearPagination: false, clearResults: true});
+    filterResults();
+}
 
     const setSummarySortOrder = (order) => {
         STATE.summarySortOrder = order;
@@ -4166,11 +4181,12 @@ function showSummarySortIcon(){
     document.addEventListener('drop', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const audioFiles = Array.from(event.dataTransfer.files).filter(file => {
-            //include folders - file.type === '', audio & video files
-            return !file.type || file.type.startsWith('audio/') || file.type.startsWith('video/');
-        });
-        const filelist = audioFiles.map(file => window.electron.showFilePath(file));
+        const filelist = Array.from(event.dataTransfer.files)
+        .filter(file => !file.name.startsWith('.') && (!file.type || file.type.startsWith('audio/') || file.type.startsWith('video/')))
+        .map(file => file.path);
+    
+        // For electron 32+
+        // const filelist = audioFiles.map(file => window.electron.showFilePath(file));
         if (filelist.length) filterValidFiles({ filePaths: filelist })
     });
     
@@ -4270,7 +4286,7 @@ function showSummarySortIcon(){
             element = document.getElementById(element);
             STATE.picker = new easepick.create({
                 element: element,
-                lang: config[config.model].locale.replace(/_.*$/, ''),
+                lang: config.locale.replace(/_.*$/, ''),
                 locale: {
                     cancel: i18n.cancel,
                     apply: i18n.apply
@@ -4431,6 +4447,34 @@ function showSummarySortIcon(){
                 });
             })
         }
+        const divider = document.getElementById('divider');
+        const summary = document.getElementById('summary');
+        const resultsDiv = document.getElementById('resultsDiv');
+    
+        let isResizing = false;
+    
+        divider.addEventListener('mousedown', function (e) {
+            isResizing = true;
+            document.body.style.cursor = 'col-resize';
+        });
+    
+        document.addEventListener('mousemove', function (e) {
+            if (!isResizing) return;
+    
+            const containerRect = document.getElementById('resultTableContainer').getBoundingClientRect();
+            const newSummaryWidth = e.clientX - containerRect.left;
+            const newResultsWidth = containerRect.right - e.clientX;
+    
+            if (newSummaryWidth > 50 && newResultsWidth > 50) { // Minimum width for both divs
+                summary.style.width = newSummaryWidth + 'px';
+                resultsDiv.style.width = newResultsWidth + 'px';
+            }
+        });
+    
+        document.addEventListener('mouseup', function () {
+            isResizing = false;
+            document.body.style.cursor = 'default';
+        });
     });
     
     
@@ -4440,12 +4484,7 @@ function showSummarySortIcon(){
     const confidenceSliderDisplay = document.getElementById('confidenceSliderContainer'); // confidence span for slider in panel - show-hide
     const filterPanelRangeInput = document.getElementById('confidenceValue'); // panel range input 
     const settingsPanelRangeInput = document.getElementById('confidence'); // confidence range input in settings
-    
-    const setConfidence = (e) => {
-        //settingsPanelRangeInput.value = e.target.value;
-        handleThresholdChange(e);
-    }
-    
+
     filterPanelThresholdDisplay.addEventListener('click', (e) => {
         e.stopPropagation();
         filterPanelRangeInput.autofocus = true
@@ -4486,7 +4525,7 @@ function showSummarySortIcon(){
         }
         if (!PREDICTING && !DOM.resultTableElement.classList.contains('d-none')) {
             worker.postMessage({ action: 'update-state', globalOffset: 0, filteredOffset: {}});
-            resetResults({clearSummary: true, clearPagination: true, clearResults: false});
+            resetResults({clearSummary: false, clearPagination: true, clearResults: false});
             filterResults();
         }
     }
@@ -4494,7 +4533,7 @@ function showSummarySortIcon(){
     // Filter handling
     const filterIconDisplay = () => {
         const i18n = getI18n(i18nTitles);
-        if (config.filters.active && (config.filters.highPassFrequency || (config.filters.lowShelfAttenuation && config.filters.lowShelfFrequency) || config.filters.SNR)) {
+        if (config.filters.active && (config.filters.highPassFrequency || (config.filters.lowShelfAttenuation && config.filters.lowShelfFrequency) || config.filters.normalise)) {
             DOM.audioFiltersIcon.classList.add('text-warning');
             DOM.audioFiltersIcon.title = i18n.audioFiltersOn;
         } else {
@@ -4511,25 +4550,25 @@ function showSummarySortIcon(){
     }
     
     // SNR
-    const handleSNRchange = () => {
-        config.filters.SNR = parseFloat(SNRSlider.value);
-        if (config.filters.SNR > 0) {
-            config.detect.contextAware = false;
-            DOM.contextAware.disabled = true;
-        } else {
-            config.detect.contextAware = DOM.contextAware.checked;
-            DOM.contextAware.disabled = false;
-        }
-        worker.postMessage({ action: 'update-state', filters: { SNR: config.filters.SNR } })
-        filterIconDisplay();
-    }
+    // const handleSNRchange = () => {
+    //     config.filters.SNR = parseFloat(SNRSlider.value);
+    //     if (config.filters.SNR > 0) {
+    //         config.detect.contextAware = false;
+    //         DOM.contextAware.disabled = true;
+    //     } else {
+    //         config.detect.contextAware = DOM.contextAware.checked;
+    //         DOM.contextAware.disabled = false;
+    //     }
+    //     worker.postMessage({ action: 'update-state', filters: { SNR: config.filters.SNR } })
+    //     filterIconDisplay();
+    // }
     
     
-    const SNRThreshold = document.getElementById('SNR-threshold');
-    const SNRSlider = document.getElementById('snrValue');
-    SNRSlider.addEventListener('input', () => {
-        SNRThreshold.textContent = SNRSlider.value;
-    });
+    // const SNRThreshold = document.getElementById('SNR-threshold');
+    // // const SNRSlider = document.getElementById('snrValue');
+    // SNRSlider.addEventListener('input', () => {
+    //     SNRThreshold.textContent = SNRSlider.value;
+    // });
 
     const colorMapThreshold = document.getElementById('color-threshold');
     const colorMapSlider = document.getElementById('color-threshold-slider');
@@ -4627,7 +4666,7 @@ function playRegion(){
     document.addEventListener('click', function (e) {
         const element = e.target;
         const target = element.closest('[id]')?.id;
-        const locale = config[config.model].locale.replace(/_.*$/, '');
+        const locale = config.locale.replace(/_.*$/, '');
         switch (target)
         {
             // File menu
@@ -4684,7 +4723,12 @@ function playRegion(){
             case 'keyboardHelp': { (async () => await populateHelpModal('keyboard', i18nHelp.keyboard[locale]))(); break }
             case 'settingsHelp': { (async () => await populateHelpModal('settings', i18nHelp.settings[locale]))(); break }
             case 'usage': { (async () => await populateHelpModal('usage', i18nHelp.usage[locale]))(); break }
-            case 'bugs': { (async () => await populateHelpModal('community', i18nHelp.community[locale]))(); break }
+            case 'community': { (async () => await populateHelpModal('community', i18nHelp.community[locale]))(); break }
+            case 'known-issues': {
+                fetchIssuesByLabel(['v'+ VERSION, 'All versions affected'])
+                    .then(issues => renderIssuesInModal(issues, VERSION))
+                    .catch(error => console.error("Error:", error));
+                break}
             case 'species': { worker.postMessage({action: 'get-valid-species', file: STATE.currentFile}); break }
             case 'startTour': { prepTour(); break }
             case 'eBird': { (async () => await populateHelpModal('ebird', i18nHelp.eBird[locale]))(); break }
@@ -4705,6 +4749,13 @@ function playRegion(){
                 break;
             }
 
+            // Settings
+            case 'basic': 
+            case 'advanced': {
+                changeSettingsMode(target)
+                break
+            }
+
             // Context-menu
             case 'play-region': { playRegion(); break }
             case 'context-analyse-selection': {getSelectionResults(); break }
@@ -4712,6 +4763,9 @@ function playRegion(){
                 element.closest('#inSummary') ? batchExportAudio() : exportAudio();
                 break;
             }
+            // XC compare play/pause
+            case 'playComparison': { ws.playPause(); break }
+
             // --- Backends
             case 'tensorflow':
             case 'webgl':
@@ -4740,7 +4794,7 @@ function playRegion(){
             case 'sort-position':
             case 'sort-time': {
                 if (! PREDICTING){
-                    setSortOrder('timestamp')
+                    STATE.resultsSortOrder === "timestamp" || setSortOrder('timestamp')
                 }
                 break;
             }
@@ -4782,9 +4836,11 @@ function playRegion(){
                     "pt": "Tem certeza de que deseja restaurar as configurações padrão? Você precisará reiniciar o Chirpity para ver as alterações.",
                     "ru": "Вы уверены, что хотите восстановить настройки по умолчанию? Вам нужно будет перезапустить Chirpity, чтобы увидеть изменения.",
                     "sv": "Är du säker på att du vill återställa till standardinställningarna? Du måste starta om Chirpity för att se ändringarna.",
-                    "zh": "您确定要恢复默认设置吗？您需要重新启动 Chirpity 才能看到更改。"
-                }
-                const locale = config[config.model].locale 
+                    "zh": "您确定要恢复默认设置吗？您需要重新启动 Chirpity 才能看到更改。",
+                    "ja": "デフォルト設定に戻してもよろしいですか？ 変更を反映するには、Chirpityを再起動する必要があります。"
+                };
+                
+                const locale = config.locale 
                 const message = i18n[locale] || i18n['en'];
                 if (confirm(message)){
                     const uuid = config.UUID;
@@ -4805,8 +4861,6 @@ function playRegion(){
                 checkFilteredFrequency();
                 worker.postMessage({action: 'update-state', audio: config.audio});
                 const fftSamples = wavesurfer.spectrogram.fftSamples;
-                wavesurfer.destroy();
-                wavesurfer = undefined;
                 adjustSpecDims(true, fftSamples);
                 document.getElementById('frequency-range').classList.remove('text-warning');
                 updatePrefs('config.json', config);
@@ -4865,8 +4919,13 @@ function playRegion(){
 
             // XC API calls (no await)
             case 'context-xc': { getXCComparisons(); break}
+            case 'debug-mode': { 
+                config.debug = !config.debug;
+                updatePrefs('config.json', config)
+                break 
+            }
         }
-        contextMenu.classList.add("d-none");
+        DOM.contextMenu.classList.add("d-none");
         if (target !=  'frequency-range' && !e.target.closest('#frequency-range-panel')){
             document.getElementById('frequency-range-panel').classList.add('d-none');
             document.getElementById('frequency-range').classList.remove('active');
@@ -4876,8 +4935,36 @@ function playRegion(){
         target && target !== 'result1' && trackEvent(config.UUID, 'UI', 'Click', target);
     })
     
+    function changeSettingsMode (target){
+        // Get references to the buttons
+        const basicButton = document.getElementById('basic');
+        const advancedButton = document.getElementById('advanced');
+        let showAdvanced;
+        if (target === 'advanced'){
+            basicButton.classList.replace('btn-primary', 'btn-secondary');
+            advancedButton.classList.replace('btn-secondary', 'btn-primary');
+            showAdvanced = true;
+        } else {
+            basicButton.classList.replace('btn-secondary','btn-primary');
+            advancedButton.classList.replace('btn-primary','btn-secondary');
+            showAdvanced = false;
+        };
+        const advancedElements = document.querySelectorAll('.advanced, .advanced-visible');
+        advancedElements.forEach(element => {
+            if (showAdvanced) {
+                element.classList.replace('advanced','advanced-visible');
+              } else {
+                element.classList.replace('advanced-visible','advanced');
+              }
+        });
+    }
+
     function updateList () {
-        worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone })
+        if (config.list === "custom"){
+            readLabels(config.customListFile[config.model], 'list')
+        } else {
+            worker.postMessage({ action: 'update-list', list: config.list, refreshResults: STATE.analysisDone })
+        }
     }
     
     function refreshSummary() {
@@ -4952,9 +5039,7 @@ function playRegion(){
                     setListUIState(element.value)
                     config.list = element.value;
                     updateListIcon();
-                    resetResults({clearSummary: true, clearPagination: true, clearResults: true});
-                    // Don't call this for custom lists
-                    config.list === 'custom' || updateList()
+                    updateList();
                     break }
                 case 'locale': {
                     let labelFile;
@@ -4968,10 +5053,10 @@ function playRegion(){
                         const chirpity = element.value === 'en_uk' && config.model !== 'birdnet' ? 'chirpity' : '';
                         labelFile = `labels/V2.4/BirdNET_GLOBAL_6K_V2.4_${chirpity}Labels_${element.value}.txt`; 
                         localiseUI(DOM.locale.value).then(result => STATE.i18n = result);
-                        config[config.model].locale = element.value;
+                        config.locale = element.value;
                         initialiseDatePicker()
                     }
-                    config[config.model].locale = element.value;
+                    config.locale = element.value;
                     STATE.picker.options.lang = element.value.replace('_uk', '');
                     readLabels(labelFile, 'locale');
                     break }
@@ -4985,15 +5070,14 @@ function playRegion(){
                     modelSettingsDisplay();
                     DOM.customListFile.value = config.customListFile[config.model];
                     DOM.customListFile.value ? LIST_MAP = getI18n(i18nLIST_MAP) : delete LIST_MAP.custom;
-                    document.getElementById('locale').value = config[config.model].locale;
-                    //config[config.model].backend = config.hasNode ? 'tensorflow' : 'webgpu';
+                    document.getElementById('locale').value = config.locale;
                     document.getElementById(config[config.model].backend).checked = true;
                     handleBackendChange(config[config.model].backend);
                     setListUIState(config.list)
                     break }
             case 'thread-slider': {
                     // change number of threads
-                    DOM.numberOfThreads.textContent = DOM.threadSlider.value;
+                    DOM.numberOfThreads.innerHTML = DOM.threadSlider.value;
                     config[config[config.model].backend].threads = DOM.threadSlider.valueAsNumber;
                     worker.postMessage({action: 'change-threads', threads: DOM.threadSlider.valueAsNumber})
                     break }
@@ -5014,8 +5098,6 @@ function playRegion(){
                     }
                     if (wavesurfer && STATE.currentFile) {
                         const fftSamples = wavesurfer.spectrogram.fftSamples;
-                        wavesurfer.destroy();
-                        wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
                     }
                     break }
@@ -5029,8 +5111,6 @@ function playRegion(){
                     config.customColormap = {'loud': loud, 'mid': mid, 'quiet': quiet, 'threshold': threshold, 'windowFn': windowFn};
                     if (wavesurfer && STATE.currentFile) {
                         const fftSamples = wavesurfer.spectrogram.fftSamples;
-                        wavesurfer.destroy();
-                        wavesurfer = undefined;
                         adjustSpecDims(true, fftSamples)
                     }
                     break }
@@ -5039,17 +5119,16 @@ function playRegion(){
                     element.blur();
                     config.audio.gain = element.value;
                     worker.postMessage({action:'update-state', audio: config.audio})
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
                     config.filters.active || toggleFilters();
-                    fileLoaded &&
+                    if (fileLoaded) {
+                        const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
                         postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+                    }
                     break }
                 case 'spec-labels': {
                     config.specLabels = element.checked;                    
                     if (wavesurfer && STATE.currentFile) {
-                        const fftSamples = wavesurfer.spectrogram.fftSamples;
-                        wavesurfer.destroy();
-                        wavesurfer = undefined;
+                        const fftSamples = wavesurfer.spectrogram.fftSamples; 
                         adjustSpecDims(true, fftSamples)
                     }
                     break }
@@ -5058,10 +5137,9 @@ function playRegion(){
                     DOM.fromInput.value = config.audio.minFrequency;
                     DOM.fromSlider.value = config.audio.minFrequency;
                     const fftSamples = wavesurfer.spectrogram.fftSamples;
-                    wavesurfer.destroy();
-                    wavesurfer = undefined;
                     adjustSpecDims(true, fftSamples);
                     checkFilteredFrequency();
+                    element.blur();
                     worker.postMessage({action: 'update-state', audio: config.audio});
                     break }
                 case 'toInput': case 'toSlider': {
@@ -5069,19 +5147,20 @@ function playRegion(){
                     DOM.toInput.value = config.audio.maxFrequency;
                     DOM.toSlider.value = config.audio.maxFrequency;
                     const fftSamples = wavesurfer.spectrogram.fftSamples;
-                    wavesurfer.destroy();
-                    wavesurfer = undefined;
                     adjustSpecDims(true, fftSamples);
                     checkFilteredFrequency();
+                    element.blur();
                     worker.postMessage({action: 'update-state', audio: config.audio});
                     break }
                 case 'normalise': {
-                    config.audio.normalise = element.checked;
-                    worker.postMessage({action:'update-state', audio: config.audio})
-                    const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
+                    config.filters.normalise = element.checked;
+                    element.checked && (config.filters.active = true);
+                    worker.postMessage({action:'update-state', filters: config.filters})
                     element.blur();
-                    fileLoaded &&
+                    if (fileLoaded) {
+                        const position = clamp(wavesurfer.getCurrentTime() / windowLength, 0, 1);
                         postBufferUpdate({ begin: bufferBegin, position: position, region: getRegion(), goToRegion: false })
+                    }
                     break }
                 case 'send-filtered-audio-to-model': {
                     config.filters.sendToModel = element.checked;
@@ -5119,6 +5198,11 @@ function playRegion(){
                     config.audio.downmix = e.target.checked;
                     worker.postMessage({ action: 'update-state', audio: config.audio })
                     break };
+                case 'buy-coffee': {
+                    config.hideBuyCoffeeWidget = e.target.checked;
+                    config.hideBuyCoffeeWidget ? DOM.buyMeCoffee.classList.add('d-none') 
+                        : DOM.buyMeCoffee.classList.remove('d-none');  
+                    break }
             }
             updatePrefs('config.json', config)
             const value = element.type === "checkbox" ? element.checked : element.value;
@@ -5127,32 +5211,35 @@ function playRegion(){
     })
     
 function setListUIState(list){
+    // Sets User Preferences for chosen model
+    // cf. modelSettingsDisplay
     DOM.customListContainer.classList.add('d-none');  
     DOM.localSwitchContainer.classList.add('d-none')
     DOM.speciesThresholdEl.classList.add('d-none'); 
     if (list === 'location') {
         DOM.speciesThresholdEl.classList.remove('d-none');
-    } else if (list === 'nocturnal' && config.model === 'birdnet'){
+    } else if (list === 'nocturnal'){
         DOM.localSwitchContainer.classList.remove('d-none')
     } else if (list === 'custom') {
         DOM.customListContainer.classList.remove('d-none');  
         if (!config.customListFile[config.model]) {
             generateToast({type: 'warning', message: 'listFileNeeded'})
-            return
         }
-        readLabels(config.customListFile[config.model], 'list');
-    } 
+    }
 }
 
 async function readLabels(labelFile, updating){
     fetch(labelFile).then(response => {
         if (! response.ok) throw new Error('Network response was not ok');
+        if (!labelFile) throw new Error('Failed to fetch');
         return response.text();
     }).catch(error =>{
         if (error.message === 'Failed to fetch') {
             generateToast({type: 'error', message: 'listNotFound', variables: {file: labelFile}})
             DOM.customListSelector.classList.add('btn-outline-danger');
-            document.getElementById('navbarSettings').click();
+            if (!document.getElementById('settings').classList.contains('show')){
+                document.getElementById('navbarSettings').click();
+            }
             document.getElementById('list-file-selector').focus();
             throw new Error(`Missing label file: ${labelFile}`)
         }
@@ -5162,21 +5249,22 @@ async function readLabels(labelFile, updating){
     }).then(filecontents => {
         LABELS = filecontents.trim().split(/\r?\n/);
         // Add unknown species
-        LABELS.push('Unknown Sp._Unknown Sp.');
+        !LABELS.includes('Unknown Sp._Unknown Sp.') && LABELS.push('Unknown Sp._Unknown Sp.');
         
         if (updating === 'list'){
-            worker.postMessage({ action: 'update-list', list: config.list, customList: LABELS, refreshResults: STATE.analysisDone, file:currentFile});
+            worker.postMessage({ action: 'update-list', list: config.list, customLabels: LABELS, refreshResults: STATE.analysisDone, file:currentFile});
             trackEvent(config.UUID, 'UI', 'Create', 'Custom list', LABELS.length)
         } else {
-            worker.postMessage({action: 'update-locale', locale: config[config.model].locale, labels: LABELS, refreshResults: STATE.analysisDone})
+            worker.postMessage({action: 'update-locale', locale: config.locale, labels: LABELS, refreshResults: STATE.analysisDone});
         }
     }).catch(error =>{
-        console.error(error)
+        // No need to record the error if it's just that the label file wasn't entered in the form
+        labelFile && console.error(error)
     })
 }
 
 function getI18n(context){
-    const locale = config[config.model].locale.replace(/_.*$/, '');
+    const locale = config.locale.replace(/_.*$/, '');
     return context[locale] || context['en'];
 }
     
@@ -5207,7 +5295,7 @@ function getI18n(context){
         if (region === undefined && ! inSummary) return;
         const createOrEdit = ((region?.attributes.label || target.closest('#summary'))) ? i18n.edit : i18n.create;
         
-        contextMenu.innerHTML = `
+        DOM.contextMenu.innerHTML = `
         <div id="${inSummary ? 'inSummary' : 'inResults'}">
             <a class="dropdown-item ${hideInSummary}" id="play-region"><span class='material-symbols-outlined'>play_circle</span> ${i18n.play}</a>
             <a class="dropdown-item ${hideInSummary} ${hideInSelection}" href="#" id="context-analyse-selection">
@@ -5254,7 +5342,7 @@ function getI18n(context){
             xc.classList.add('d-none');
             contextDelete.classList.add('d-none');
         }
-        positionMenu(contextMenu, e);
+        positionMenu(DOM.contextMenu, e);
     }
     
     function positionMenu(menu, event) {
@@ -5363,7 +5451,7 @@ function getI18n(context){
             position: {row: activeRow?.rowIndex - 1, page: getCurrentPage()}, //  have to account for the header row
             speciesFiltered: isSpeciesViewFiltered(true)
         })
-        resetResults({clearPagination: false})
+        //resetResults({clearPagination: false})
     }
 
     function checkFilteredFrequency(){
@@ -5523,7 +5611,7 @@ function getI18n(context){
             const example_file = await window.electron.getAudio();
             // create a canvas for the audio spec
             showElement(['spectrogramWrapper'], false);
-            loadAudioFile({ filePath: example_file });
+            loadAudioFileSync({ filePath: example_file });
         }
         startTour();
     }
@@ -5603,10 +5691,13 @@ function getI18n(context){
     
     
 
-    function generateToast({message = '', type = 'info', autohide = true, variables = undefined} ={}) {
+    function generateToast({message = '', type = 'info', autohide = true, variables = undefined, locate = ''} ={}) {
         // i18n
         const i18n = getI18n(i18nToasts);
+        message === 'noFile' && clearTimeout(loadingTimeout) && DOM.loading.classList.add('d-none');
         message = variables ? interpolate(i18n[message], variables) : i18n[message] || message;
+        // add option to locate a missing file
+        message += locate;
         const domEl = document.getElementById('toastContainer');
         
         const wrapper = document.createElement('div');
@@ -5682,38 +5773,7 @@ function getI18n(context){
         }
     }
 
-    function parseSemVer(versionString) {
-        const semVerRegex = /^[vV]?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-.]+))?(?:\+([0-9A-Za-z-.]+))?$/;
-        const matches = versionString.match(semVerRegex);
-        if (!matches) {
-            throw new Error('Invalid SemVer version string');
-        }
-        
-        const [, major, minor, patch, preRelease, buildMetadata] = matches;
-        
-        return {
-            major: parseInt(major),
-            minor: parseInt(minor),
-            patch: parseInt(patch),
-            preRelease: preRelease || null,
-            buildMetadata: buildMetadata || null
-        };
-    }
-    
-    function isNewVersion(latest, current) {
-        if (latest.major > current.major) {
-            return true;
-        } else if (latest.major === current.major) {
-            if (latest.minor > current.minor) {
-                return true;
-            } else if (latest.minor === current.minor) {
-                if (latest.patch > current.patch) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
+
 
     // Not Harlem, but Fisher-Yates shuffle - used for xc call selection
     function shuffle(array) {
@@ -5829,7 +5889,7 @@ function renderComparisons(lists, cname){
     compareDiv.id = "compareModal";
     compareDiv.tabIndex = -1;
     compareDiv.setAttribute('aria-labelledby', "compareModalLabel");
-    compareDiv.setAttribute('aria-hidden', "true");
+    compareDiv.setAttribute('aria-modal', "true");
     compareDiv.setAttribute( "data-bs-backdrop", "static");
     const compareHTML = `
         <div class="modal-dialog modal-lg modal-dialog-bottom w-100">
@@ -5963,7 +6023,7 @@ function renderComparisons(lists, cname){
 }
 
 let ws;
-const playComparison = () => {ws.playPause()}
+
 
 function showCompareSpec() {
     if (ws) ws.destroy()
@@ -6018,14 +6078,7 @@ function showCompareSpec() {
     ws.on('ready', function () {
         mediaContainer.removeChild(loading);
     })
-
-
     ws.load(file)
-    const playButton = document.getElementById('playComparison')
-    // prevent listener accumulation
-    playButton.removeEventListener('click', playComparison)
-    playButton.addEventListener('click', playComparison)
-
 }
 
 

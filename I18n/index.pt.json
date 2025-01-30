@@ -69,7 +69,8 @@
   "keyboardHelp": ["Atalhos de Teclado"],
   "diagnostics": ["Diagnósticos"],
   "startTour": ["Mostrar Tour"],
-  "bugs": ["Junte-se à comunidade"],
+  "community": ["Junte-se à comunidade"],
+  "known-issues": ["Problemas conhecidos (em inglês)"], 
   "FAQ": ["FAQs"],
   "species": ["Quais espécies são detectadas?"],
   "eBird": ["O que é um Registro eBird?"],
@@ -88,6 +89,8 @@
   "archive-location-select": ["Localização da biblioteca:"],
   "close-tour": ["Fechar"],
   "settings": {
+    "basic": "Padrão",
+    "advanced": "Especialista",
     "clear-call-cache": ["Limpar cache de chamadas de referência"],
     "reset-defaults": ["Redefinir para as configurações padrão"],
     "model-to-use": "Modelo:",
@@ -136,6 +139,7 @@
     "context": "Modo contexto",
     "snrValue": "Filtro SNR:",
     "file-timestamp": "Os carimbos de data e hora do arquivo marcam o início da gravação",
+    "buy-coffee": "Ocultar o widget de café",
     "debug-mode": "Modo de depuração"
   },
   "record-entry": {

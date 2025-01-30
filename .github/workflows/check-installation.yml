@@ -9,6 +9,7 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest] 
     env: 
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      CI: true
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
       - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
@@ -58,6 +59,7 @@ jobs:
           echo "BINARY=$BINARY" >> $GITHUB_ENV
           
       - name: Overwrite FFmpeg binary
+        if: runner.os == 'MacOS'
         run: |
           echo "copying  ./build/$PLATFORM/$BINARY to ./node_modules/@ffmpeg-installer/$PLATFORM/$BINARY"
           cp ./build/$PLATFORM/$BINARY ./node_modules/@ffmpeg-installer/$PLATFORM/$BINARY
@@ -74,7 +76,7 @@ jobs:
                     }, 5000);' ./node_modules/fluent-ffmpeg/lib/processor.js
       
           # uncomment to view changed file
-          # cat ./node_modules/fluent-ffmpeg/lib/processor.js
+          #cat ./node_modules/fluent-ffmpeg/lib/processor.js
         shell: bash
       
       - name: Modify colorScale.js - Add inverted greys colormap
@@ -84,6 +86,14 @@ jobs:
             "igreys":[{"index":0,"rgb":[255,255,255]},{"index":1,"rgb":[0,0,0]}],' ./node_modules/colormap/colorScale.js \
             && rm -f ./node_modules/colormap/colorScale.js.bak
 
+        shell: bash
+
+      - name: Modify tracking code
+        run: |
+          # Replace development with production tracking
+          sed -i.bak '1s/const ID_SITE = 3;/const ID_SITE = 2;/' ./js/tracking.js \
+          && rm -f ./js/tracking.js.bak
+          cat ./js/tracking.js
         shell: bash
 
       # test application here
@@ -151,11 +161,11 @@ jobs:
           VERSION=$(jq -r '.version' package.json)
           # Construct the filename
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            FILENAME="chirpity Setup $VERSION.exe"
+            FILENAME="Chirpity Setup $VERSION.exe"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            FILENAME="chirpity-$VERSION-arm64.pkg"
+            FILENAME="Chirpity-$VERSION-arm64.pkg"
           else
-            FILENAME="chirpity-$VERSION.AppImage"
+            FILENAME="Chirpity-$VERSION.AppImage"
           fi
           # Check if the file exists
           if [ -f "./dist/$FILENAME" ]; then
@@ -166,8 +176,16 @@ jobs:
       - run: echo "File check status is ${{ job.status }}."
 
       # Tests
+
       - name: Test packaged application
         if: runner.os != 'Linux'
         run: npm test
 
+      # - name: Set locale to de_DE.UTF-8 for Mac, before testing application
+      #   if: runner.os == 'macOS'
+      #   run: |
+      #       export LC_ALL=de_DE.UTF-8
+      #       export LANG=de_DE.UTF-8
+      #       python -c "import locale; locale.setlocale(locale.LC_ALL, locale.getlocale()[0]); print(locale.localeconv())"
+      #       LANG=de_DE.UTF-8 LC_ALL=de_DE.UTF-8 npm test
 

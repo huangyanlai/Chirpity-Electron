@@ -69,7 +69,8 @@
     "keyboardHelp": ["Tangentbordsgenvägar"],
     "diagnostics": ["Diagnostik"],
     "startTour": ["Visa tur"],
-    "bugs": ["Gå med i communityn"],
+    "community": ["Gå med i communityn"],
+    "known-issues": ["Kända problem (på engelska)"], 
     "FAQ": ["Vanliga frågor"],
     "species": ["Vilka arter har upptäckts?"],
     "eBird": ["Vad är en eBird-register?"],
@@ -88,6 +89,8 @@
     "archive-location-select": ["Bibliotekets plats:"],
     "close-tour": ["Stäng"],
     "settings": {
+        "basic": "Standard",
+        "advanced": "Expert",
         "clear-call-cache": ["Rensa referenssamtalscache"],
         "reset-defaults": ["Återställ till standardinställningar"],
         "model-to-use": "Modell:",
@@ -136,6 +139,7 @@
         "context": "Kontextläge",
         "snrValue": "SNR-filter:",
         "file-timestamp": "Filens tidsstämplar markerar inspelningens start",
+        "buy-coffee": "Dölj kaffewidgeten",
         "debug-mode": "Felsökningsläge"
     },
     "record-entry": {

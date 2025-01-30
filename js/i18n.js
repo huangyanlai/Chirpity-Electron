@@ -28,7 +28,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Unable to extract essential metadata from ${src}",
         noLoad: 'The ${model} model is not loaded. Restart Chirpity to continue. If you see this message repeatedly, it is likely your computer does not support AVX2 and Chirpity will not run on your system.',
         noDLL: 'There has been an error loading the model. This may be due to missing AVX support. Chirpity AI models require the AVX2 instructions set to run. If you have AVX2 enabled and still see this notice, please refer to <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">this issue</a> on Github.',
-        noFile: "Cannot locate: ${file}",
+        noFile: "Cannot open: ${error}",
         ffmpeg: 'FFMPEG error extracting audio: ${error}',
         noNight: 'No detections. ${file} has no period within it where predictions would be given. <b>Tip:</b> To see detections in this file, disable nocmig mode and run the analysis again.',
         saveBlocked: "Cannot save file ${filePath}\nbecause it is open in another application",
@@ -55,7 +55,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">No changes made</span>. The selected file already exists in the Archive.',
         fileUpdateError: '<span class="text-danger">An error occurred while updating the file: ${message}</span>',
         goodFilePurge: '${file} and its associated records were deleted successfully',
-        failedFilePrge: '${file} was not found in in the Archive',
+        failedFilePurge: '${file} was not found in in the Archive',
         fileToConvertNotFound: 'Cannot find ${file}, skipping conversion.',
         mkDirFailed: 'Failed to create directory: ${path}<br>Error: ${error}',
         conversionComplete: 'Conversion complete, ${successTotal} successful, ${failedTotal} failed.',
@@ -90,7 +90,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Kan ikke udtrække væsentlige metadata fra ${src}",
         noLoad: 'Modellen ${model} er ikke indlæst. Genstart Chirpity for at fortsætte. Hvis du ser denne besked gentagne gange, er det sandsynligt, at din computer ikke understøtter AVX2, og Chirpity vil ikke køre på dit system.',
         noDLL: 'Der opstod en fejl ved indlæsning af modellen. Dette kan skyldes manglende AVX-understøttelse. Chirpity AI-modeller kræver AVX2-instruktionssættet for at køre. Hvis AVX2 er aktiveret, og du stadig ser denne meddelelse, skal du henvises til <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">denne sag</a> på Github.',
-        noFile: "Kan ikke finde: ${file}",
+        noFile: "Kan ikke åbne: ${error}",
         ffmpeg: 'FFMPEG-fejl ved udtrækning af lyd: ${error}',
         noNight: 'Ingen detektioner. ${file} har ikke noget tidsrum, hvor forudsigelser ville blive givet. <b>Tip:</b> For at se detektioner i denne fil, skal du deaktivere nocmig-tilstand og køre analysen igen.',
         saveBlocked: "Kan ikke gemme filen ${filePath}\nfordi den er åben i en anden applikation",
@@ -117,7 +117,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Ingen ændringer foretaget</span>. Den valgte fil findes allerede i Arkivet.',
         fileUpdateError: '<span class="text-danger">Der opstod en fejl under opdatering af filen: ${message}</span>',
         goodFilePurge: '${file} og de tilknyttede poster blev slettet med succes',
-        failedFilePrge: "${file} blev ikke fundet i Arkivet",
+        failedFilePurge: "${file} blev ikke fundet i Arkivet",
         fileToConvertNotFound: "Kan ikke finde ${file}, springer over konvertering.",
         mkDirFailed: "Kunne ikke oprette mappen: ${path}<br>Fejl: ${error}",
         conversionComplete: "Konvertering fuldført, ${successTotal} lykkedes, ${failedTotal} fejlede.",
@@ -152,7 +152,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Kann wesentliche Metadaten aus ${src} nicht extrahieren",
         noLoad: 'Das Modell ${model} wurde nicht geladen. Starten Sie Chirpity neu, um fortzufahren. Wenn diese Nachricht wiederholt angezeigt wird, unterstützt Ihr Computer möglicherweise kein AVX2, und Chirpity wird auf Ihrem System nicht ausgeführt.',
         noDLL: 'Beim Laden des Modells ist ein Fehler aufgetreten. Dies könnte an fehlender AVX-Unterstützung liegen. Chirpity AI-Modelle benötigen das AVX2-Instruktionsset zum Ausführen. Wenn AVX2 aktiviert ist und Sie diese Nachricht trotzdem sehen, beziehen Sie sich bitte auf <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">dieses Problem</a> auf Github.',
-        noFile: "Kann nicht finden: ${file}",
+        noFile: "Kann nicht öffnen: ${error}",
         ffmpeg: 'FFMPEG-Fehler bei der Extraktion von Audio: ${error}',
         noNight: 'Keine Detektionen. ${file} hat keinen Zeitraum, in dem Vorhersagen gegeben würden. <b>Tip:</b> Um Detektionen in dieser Datei zu sehen, deaktivieren Sie den nocmig-Modus und führen Sie die Analyse erneut durch.',
         saveBlocked: "Kann die Datei ${filePath} nicht speichern, weil sie in einer anderen Anwendung geöffnet ist",
@@ -179,7 +179,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Keine Änderungen vorgenommen</span>. Die ausgewählte Datei ist bereits im Archiv vorhanden.',
         fileUpdateError: '<span class="text-danger">Beim Aktualisieren der Datei ist ein Fehler aufgetreten: ${message}</span>',
         goodFilePurge: "${file} und die zugehörigen Datensätze wurden erfolgreich gelöscht",
-        failedFilePrge: "${file} wurde im Archiv nicht gefunden",
+        failedFilePurge: "${file} wurde im Archiv nicht gefunden",
         fileToConvertNotFound: "Kann ${file} nicht finden, Überspringe Konvertierung.",
         mkDirFailed: "Fehler beim Erstellen des Verzeichnisses: ${path}<br>Fehler: ${error}",
         conversionComplete: "Konvertierung abgeschlossen, ${successTotal} erfolgreich, ${failedTotal} fehlgeschlagen.",
@@ -214,7 +214,7 @@ const i18nToasts = { // UI.js
         badMetadata: "No se pueden extraer los metadatos esenciales de ${src}",
         noLoad: 'El modelo ${model} no está cargado. Reinicie Chirpity para continuar. Si ve este mensaje repetidamente es probable que su ordenador no sea compatible con AVX2 y que Chirpity no pueda ejecutarse en su sistema.',
         noDLL: 'Ha ocurrido un error al cargar el modelo. Esto puede deberse a la falta de soporte para AVX. Los modelos de inteligencia artificial de Chirpity requieren el conjunto de instrucciones AVX2 para funcionar. Si tiene AVX2 habilitado y sigue viendo este mensaje, consulte <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">este problema</a> en Github.',
-        noFile: "No se puede localizar: ${file}",
+        noFile: "No se puede abrir: ${error}",
         ffmpeg: 'Error de FFMPEG al extraer audio: ${error}',
         noNight: 'No se encontraron detecciones. ${file} no tiene un periodo en el que se puedan hacer predicciones. <b>Consejo:</b> Para ver detecciones en este archivo desactive el modo nocmig y ejecute otra vez el análisis.',
         saveBlocked: "No se puede guardar el archivo ${filePath} porque está abierto en otra aplicación",
@@ -241,7 +241,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">No se realizaron cambios</span>. El archivo seleccionado ya existe en el Archivo.',
         fileUpdateError: '<span class="text-danger">Ocurrió un error al actualizar el archivo: ${message}</span>',
         goodFilePurge: "${file} y sus registros asociados fueron eliminados correctamente",
-        failedFilePrge: "${file} no se encontró en el Archivo",
+        failedFilePurge: "${file} no se encontró en el Archivo",
         fileToConvertNotFound: "No se puede encontrar ${file}, se omite la conversión.",
         mkDirFailed: "Error al crear el directorio: ${path}<br>Error: ${error}",
         conversionComplete: "Conversión completada, ${successTotal} exitosas, ${failedTotal} fallidas.",
@@ -276,7 +276,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Impossible d'extraire les métadonnées essentielles de ${src}",
         noLoad: 'Le modèle ${model} n\'est pas chargé. Redémarrez Chirpity pour continuer. Si vous voyez ce message à plusieurs reprises, il est probable que votre ordinateur ne prenne pas en charge AVX2 et Chirpity ne fonctionnera pas sur votre système.',
         noDLL: 'Une erreur est survenue lors du chargement du modèle. Cela peut être dû à un manque de prise en charge d\'AVX. Les modèles AI de Chirpity nécessitent le jeu d\'instructions AVX2 pour fonctionner. Si vous avez AVX2 activé et que vous voyez toujours cet avertissement, veuillez vous référer à <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">ce problème</a> sur Github.',
-        noFile: "Impossible de localiser : ${file}",
+        noFile: "Impossible d'ouvrir : ${error}",
         ffmpeg: 'Erreur FFMPEG lors de l\'extraction de l\'audio : ${error}',
         noNight: 'Aucune détection. ${file} ne contient pas de période où des prédictions pourraient être effectuées. <b>Astuce :</b> Pour voir les détections dans ce fichier, désactivez le mode nocmig et relancez l\'analyse.',
         saveBlocked: "Impossible de sauvegarder le fichier ${filePath}\ncar il est ouvert dans une autre application",
@@ -303,11 +303,71 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Aucun changement effectué</span>. Le fichier sélectionné existe déjà dans l\'Archive.',
         fileUpdateError: '<span class="text-danger">Une erreur est survenue lors de la mise à jour du fichier : ${message}</span>',
         goodFilePurge: '${file} et ses enregistrements associés ont été supprimés avec succès',
-        failedFilePrge: "${file} n'a pas été trouvé dans l'Archive",
+        failedFilePurge: "${file} n'a pas été trouvé dans l'Archive",
         fileToConvertNotFound: "Impossible de trouver ${file}, conversion ignorée.",
         mkDirFailed: "Échec de la création du répertoire : ${path}<br>Erreur : ${error}",
         conversionComplete: "Conversion terminée, ${successTotal} réussie(s), ${failedTotal} échouée(s).",
         libraryUpToDate: "La bibliothèque est à jour. Aucune action nécessaire"
+    },
+    ja: {
+        info: '情報', warning: '警告', error: 'エラー',
+        maxFiles: "Chirpityは最大25,000ファイルのオープンを制限しています。試行された${STATE.openFiles.length}のうち最初の25,000のみが開かれます",
+        analysisUnderway:"分析が進行中です。新しい分析を実行する前に<b>Esc</b>を押してキャンセルしてください。",
+        placeOutOfBounds: "緯度は-90から90の間、経度は-180から180の間でなければなりません。",
+        placeNotFound: "この場所の検索に失敗しました。インターネット接続を確認するか、後でもう一度試してください。",
+        mustFilterSpecies: "オーディオファイルをエクスポートするには、種別で結果をフィルタリングしてください",
+        noNode: "このマシンで標準のバックエンドをロードできませんでした。代わりに実験的なバックエンド（webGPU）が使用されました。",
+        badMessage: "ワーカーからの認識されないメッセージ:${args.event}",
+        changeListBlocked:"分析が進行中のため、リスト設定を変更することはできません。ただし、分析が完了した後にリストを変更することは<b>可能</b>です",
+        cancelled: "操作がキャンセルされました",
+        badTime: "無効な時間形式です。次の形式のいずれかで時間を入力してください：\n1. 浮動小数点数（秒）\n2. コロンで区切られた2つの数字（分と秒）\n3. コロンで区切られた3つの数字（時、分、秒）",
+        complete: "分析が完了しました。",
+        feedback: "ありがとうございます。あなたのフィードバックはChirpityの予測を改善するのに役立ちます",
+        contextBlocked: "分析が進行中のため、コンテキストモード設定を変更することはできません。",
+        noCallCache: "コールキャッシュが見つかりませんでした。",
+        callCacheCleared: "コールキャッシュが正常にクリアされました。",
+        badThreshold: "しきい値は0.001から1の間の数値でなければなりません",
+        labelFileNeeded: "カスタム言語オプションを使用するには、リスト設定でラベルファイルを選択する必要があります。",
+        listFileNeeded: "カスタムリストオプションを使用する前に、モデルのカスタムリストをアップロードする必要があります。",
+        listNotFound: 'カスタムリストファイル: ${file}が見つかりませんでした。<b class="text-danger">検出は表示されません</b>。',
+        leafletError: 'マップの表示中にエラーが発生しました: ${error}',
+        noXC: "Xeno-canto APIが応答していません",
+        noComparisons: "Xeno-cantoサイトには比較可能なデータがありません",
+        noIUCNRecord: "IUCNレッドリストに<b>${sname}</b>の記録がありません。",
+        badMetadata: "${src}から重要なメタデータを抽出できません",
+        noLoad: '${model}モデルがロードされていません。Chirpityを再起動して続行してください。このメッセージが繰り返し表示される場合、お使いのコンピュータがAVX2をサポートしていない可能性があります。',
+        noDLL: 'モデルのロード中にエラーが発生しました。これはAVXサポートが欠如しているためかもしれません。Chirpity AIモデルはAVX2命令セットを必要とします。AVX2が有効であるにもかかわらずこの通知が表示される場合は、<a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">この問題</a>を参照してください。',
+        noFile: "開くことができません: ${error}",
+        ffmpeg: 'オーディオ抽出中のFFMPEGエラー: ${error}',
+        noNight: '検出なし。${file}には予測が行われる期間が含まれていません。<b>ヒント:</b> このファイルで検出を表示するには、nocmigモードを無効にして再度分析を実行してください。',
+        saveBlocked: "他のアプリケーションで開かれているため、ファイル${filePath}を保存できません",
+        goodSave: '${filePath}が正常に書き込まれました。',
+        noDetections: "選択範囲に検出が見つかりません",
+        noDetectionsDetailed: '${nocmig} ${species}の検出が${archive}で見つかりませんでした。${list}リストを使用して検索しました。',
+        noDetectionsDetailed2: '${file}に検出が見つかりませんでした。${list}リストを使用して、最小信頼度${confidence}%のレコードを検索しました。',
+        dbNotLoaded: "データベースの読み込みが完了していません。アーカイブ内のファイルの存在確認はスキップされました",
+        noSnameFound: "カスタムリストの${line}行目にある'${sname}'が<strong>${model}</strong>モデルリストに見つかりません。<strong>ヒント:</strong> <ol><li>リストは<strong>${model}</strong>モデル用ですか？そうでない場合は、設定でモデルを変更してください</li><li>種名にタイプミスがないか確認してください</li></ol>",
+        noArchive: "アーカイブ場所にアクセスできません: ${location}. <br> 操作が中止されました",
+        noWriteArchive: "アーカイブ場所に書き込めません: ${location}. <br> 操作が中止されました",
+        multiDay: "マルチデイ操作はまだサポートされていません: ${file}はトリミングされません",
+        allDaylight: "${file}は全て日中のため、アーカイブに追加されません。",
+        conversionDone: "${file}の変換が完了しました",
+        badConversion: "${file}の変換中にエラーが発生しました: ${error}",
+        noDirectory: "フォルダ'${match}'を見つけることができません",
+        dbFileMissing: "サポートされているファイル拡張子のいずれかで保存されたファイルを見つけることができません: ${file}",
+        goodResultSave: "${number}の結果がアーカイブに保存されました",
+        NoOP: 'レコードは既に保存されています。何もすることはありません',
+        goodDBUpdate: 'データベースの更新が完了しました。${total}のレコードが${seconds}秒でアーカイブに追加されました',
+        fileLocationUpdated: 'ファイルの場所がアーカイブで正常に更新されました。結果を更新してレコードを確認してください。',
+        durationMismatch: '<span class="text-danger">変更なし</span>。選択されたファイルは元のファイルと異なる長さです。',
+        duplicateFIle: '<span class="text-danger">変更なし</span>。選択されたファイルは既にアーカイブに存在します。',
+        fileUpdateError: '<span class="text-danger">ファイルの更新中にエラーが発生しました: ${message}</span>',
+        goodFilePurge: '${file}とその関連レコードが正常に削除されました',
+        failedFilePurge: '${file}はアーカイブに見つかりませんでした',
+        fileToConvertNotFound: '${file}が見つかりません、変換をスキップします。',
+        mkDirFailed: 'ディレクトリの作成に失敗しました: ${path}<br>エラー: ${error}',
+        conversionComplete: '変換が完了しました。成功: ${successTotal}、失敗: ${failedTotal}',
+        libraryUpToDate: 'ライブラリは最新です。何もすることはありません'
     },
     nl: {
         info: 'Kennisgeving', warning: 'Waarschuwing', error: 'Fout',
@@ -338,7 +398,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Kan essentiële metadata niet extraheren uit ${src}",
         noLoad: 'Het ${model} model is niet geladen. Herstart Chirpity om door te gaan. Als je dit bericht herhaaldelijk ziet, ondersteunt je computer waarschijnlijk geen AVX2 en zal Chirpity niet op je systeem werken.',
         noDLL: 'Er is een fout opgetreden bij het laden van het model. Dit kan te maken hebben met ontbrekende AVX-ondersteuning. Chirpity AI-modellen vereisen de AVX2-instructieset om te draaien. Als je AVX2 hebt ingeschakeld en nog steeds deze melding ziet, raadpleeg dan <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">dit probleem</a> op Github.',
-        noFile: "Kan niet lokaliseren: ${file}",
+        noFile: "Kan niet openen: ${error}",
         ffmpeg: 'FFMPEG-fout bij het extraheren van audio: ${error}',
         noNight: 'Geen detecties. ${file} heeft geen periode waarin voorspellingen zouden worden gegeven. <b>Tip:</b> Om detecties in dit bestand te zien, schakel je de nocmig-modus uit en voer je de analyse opnieuw uit.',
         saveBlocked: "Kan bestand ${filePath} niet opslaan\nomdat het geopend is in een andere toepassing",
@@ -365,7 +425,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Geen wijzigingen aangebracht</span>. Het geselecteerde bestand bestaat al in het Archief.',
         fileUpdateError: '<span class="text-danger">Er is een fout opgetreden bij het bijwerken van het bestand: ${message}</span>',
         goodFilePurge: "${file} en de bijbehorende records zijn succesvol verwijderd",
-        failedFilePrge: "${file} werd niet gevonden in het Archief",
+        failedFilePurge: "${file} werd niet gevonden in het Archief",
         fileToConvertNotFound: "Kan ${file} niet vinden, conversie overgeslagen.",
         mkDirFailed: "Kan map niet aanmaken: ${path}<br>Fout: ${error}",
         conversionComplete: "Conversie voltooid, ${successTotal} succesvol, ${failedTotal} mislukt.",
@@ -400,7 +460,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Não foi possível extrair os metadados essenciais de ${src}",
         noLoad: 'O modelo ${model} não está carregado. Reinicie o Chirpity para continuar. Se você ver esta mensagem repetidamente, é provável que seu computador não suporte AVX2 e o Chirpity não funcionará no seu sistema.',
         noDLL: 'Ocorreu um erro ao carregar o modelo. Isso pode ser devido à falta de suporte AVX. Os modelos de IA do Chirpity exigem o conjunto de instruções AVX2 para funcionar. Se você tiver o AVX2 ativado e ainda ver este aviso, consulte <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">este problema</a> no Github.',
-        noFile: "Não foi possível localizar: ${file}",
+        noFile: "Não é possível abrir: ${error}",
         ffmpeg: 'Erro FFMPEG ao extrair áudio: ${error}',
         noNight: 'Sem detecções. ${file} não possui um período dentro dele onde previsões seriam fornecidas. <b>Dica:</b> Para ver as detecções neste arquivo, desative o modo nocmig e execute a análise novamente.',
         saveBlocked: "Não foi possível salvar o arquivo ${filePath}\nporque está aberto em outro aplicativo",
@@ -427,7 +487,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Nenhuma alteração feita</span>. O arquivo selecionado já existe no Arquivo.',
         fileUpdateError: '<span class="text-danger">Ocorreu um erro ao atualizar o arquivo: ${message}</span>',
         goodFilePurge: "${file} e seus registros associados foram excluídos com sucesso",
-        failedFilePrge: "${file} não foi encontrado no Arquivo",
+        failedFilePurge: "${file} não foi encontrado no Arquivo",
         fileToConvertNotFound: "Não foi possível encontrar ${file}, conversão ignorada.",
         mkDirFailed: "Falha ao criar o diretório: ${path}<br>Erro: ${error}",
         conversionComplete: "Conversão concluída, ${successTotal} bem-sucedida(s), ${failedTotal} falhada(s).",
@@ -462,7 +522,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Не удалось извлечь необходимые метаданные из ${src}",
         noLoad: 'Модель ${model} не загружена. Для продолжения работы перезапустите Chirpity. Если вы постоянно видите это сообщение, скорее всего, ваш компьютер не поддерживает AVX2 и Chirpity не будет работать в вашей системе.',
         noDLL: 'Произошла ошибка при загрузке модели. Это может быть связано с отсутствием поддержки AVX. Для запуска моделей AI Chirpity требуется набор инструкций AVX2. Если у вас включен AVX2 и вы по-прежнему видите это уведомление, пожалуйста, обратитесь к <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">этому вопросу</a> на Github.',
-        noFile: "Не удается найти: ${file}",
+        noFile: "Не удается открыть: ${error}",
         ffmpeg: 'Ошибка FFMPEG при извлечении аудио: ${error}',
         noNight: 'Нет обнаружений. В ${file} нет периода, в течение которого можно было бы давать прогнозы. <b>Совет:</b> Чтобы увидеть обнаружения в этом файле, отключите режим nocmig и запустите анализ еще раз.',
         saveBlocked: "Не удается сохранить файл ${filePath}\n потому, что он открыт в другом приложении",
@@ -489,7 +549,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Изменений не внесено</span>. Выбранный файл уже существует в архиве.',
         fileUpdateError: '<span class="text-danger">Произошла ошибка при обновлении файла: ${message}</span>',
         goodFilePurge: "${file} и связанные с ним записи успешно удалены",
-        failedFilePrge: "${file} не найден в архиве",
+        failedFilePurge: "${file} не найден в архиве",
         fileToConvertNotFound: "Не удалось найти ${file}, пропуск конвертации.",
         mkDirFailed: "Не удалось создать директорию: ${path}<br>Ошибка: ${error}",
         conversionComplete: "Конвертация завершена: ${successTotal} успешно, ${failedTotal} с ошибками.",
@@ -524,7 +584,7 @@ const i18nToasts = { // UI.js
         badMetadata: "Kunde inte extrahera nödvändig metadata från ${src}",
         noLoad: 'Modellen ${model} är inte laddad. Starta om Chirpity för att fortsätta. Om du ser detta meddelande upprepade gånger, är det troligt att din dator inte stöder AVX2 och Chirpity kommer inte att fungera på ditt system.',
         noDLL: 'Det har uppstått ett fel vid inläsning av modellen. Detta kan bero på att AVX-stöd saknas. Chirpity AI-modeller kräver AVX2-instruktionsuppsättningen för att fungera. Om du har AVX2 aktiverat och fortfarande ser detta meddelande, vänligen hänvisa till <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">detta problem</a> på Github.',
-        noFile: "Kunde inte hitta: ${file}",
+        noFile: "Kan inte öppna: ${error}",
         ffmpeg: 'FFMPEG-fel vid extrahering av ljud: ${error}',
         noNight: 'Inga detektioner. ${file} har ingen period inom den där förutsägelser skulle göras. <b>Tips:</b> För att se detektioner i denna fil, inaktivera nocmig-läget och kör analysen igen.',
         saveBlocked: "Kan inte spara filen ${filePath}\nför att den är öppen i ett annat program",
@@ -551,7 +611,7 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">Inga ändringar gjorda</span>. Den valda filen finns redan i arkivet.',
         fileUpdateError: '<span class="text-danger">Ett fel uppstod vid uppdatering av filen: ${message}</span>',
         goodFilePurge: "${file} och dess associerade poster raderades framgångsrikt",
-        failedFilePrge: "${file} hittades inte i arkivet",
+        failedFilePurge: "${file} hittades inte i arkivet",
         fileToConvertNotFound: "Kan inte hitta ${file}, hoppar över konverteringen.",
         mkDirFailed: "Kunde inte skapa katalog: ${path}<br>Fel: ${error}",
         conversionComplete: "Konvertering klar, ${successTotal} lyckades, ${failedTotal} misslyckades.",
@@ -586,7 +646,7 @@ const i18nToasts = { // UI.js
         badMetadata: "无法从 ${src} 提取必要的元数据",
         noLoad: '模型 ${model} 未加载。请重新启动 Chirpity 以继续。如果您重复看到此消息，可能是您的计算机不支持 AVX2，Chirpity 将无法在您的系统上运行。',
         noDLL: '加载模型时发生错误。这可能是由于缺少 AVX 支持。Chirpity AI 模型需要 AVX2 指令集才能运行。如果您已启用 AVX2 但仍然看到此通知，请参考 <a href="https://github.com/Mattk70/Chirpity-Electron/issues/84" target="_blank">此问题</a> 以获取更多信息。',
-        noFile: "无法找到: ${file}",
+        noFile: "无法打开：${error}",
         ffmpeg: 'FFMPEG 提取音频时出错: ${error}',
         noNight: '没有检测到。${file} 中没有任何预测应该给出的时间段。<b>提示：</b> 若要查看此文件中的检测结果，请禁用 nocmig 模式并重新运行分析。',
         saveBlocked: "无法保存文件 ${filePath}\n因为文件正在另一个应用程序中打开",
@@ -613,13 +673,26 @@ const i18nToasts = { // UI.js
         duplicateFIle: '<span class="text-danger">未作任何更改</span>。选定的文件已存在于档案中。',
         fileUpdateError: '<span class="text-danger">更新文件时出错：${message}</span>',
         goodFilePurge: "${file} 及其相关记录已成功删除",
-        failedFilePrge: "未在档案中找到 ${file}",
+        failedFilePurge: "未在档案中找到 ${file}",
         fileToConvertNotFound: "无法找到 ${file}，跳过转换。",
         mkDirFailed: "无法创建目录：${path}<br>错误：${error}",
         conversionComplete: "转换完成，成功：${successTotal}，失败：${failedTotal}。",
         libraryUpToDate: "资料库已是最新，无需操作"
     }
     
+};
+const i18nAll = {
+    "en": ["(Default)", "All"],
+    "da": ["(Standard)", "Alle"],
+    "de": ["(Standard)", "Alle"],
+    "es": ["(Predeterminado)", "Todos"],
+    "fr": ["(Par défaut)", "Tout"],
+    "nl": ["(Standaard)", "Alles"],
+    "pt": ["(Padrão)", "Todos"],
+    "ru": ["(По умолчанию)", "Все"],
+    "sv": ["(Standard)", "Alla"],
+    "zh": ["(默认)", "所有"],
+    "ja": ["(デフォルト)", "すべて"]
 };
 
 const i18nHeadings = {
@@ -677,6 +750,17 @@ const i18nHeadings = {
         max: 'Maximum',
         detections: 'Détections',
         location: "Emplacement"
+    },
+    ja: {
+        position: ['位置', "検出時間で結果を並べ替える"],
+        time: ['時間', "検出時間で結果を並べ替える"],
+        species: ['種', "検出信頼度で結果を並べ替える"],
+        calls: 'コール',
+        label: 'ラベル',
+        notes: 'ノート',
+        max: '最大',
+        detections: '検出',
+        location: '場所'
     },
     nl: {
         position: ['Positie', "Sorteer resultaten op detectietijd"],
@@ -741,6 +825,7 @@ const i18nHelp = {
       fr: 'Raccourcis clavier',
       de: 'Tastenkombinationen',
       es: 'Atajos de teclado',
+      ja: 'キーボードショートカット',   // Japanese
       pt: 'Atalhos de teclado',
       ru: 'Горячие клавиши',
       nl: 'Sneltoetsen',
@@ -753,6 +838,7 @@ const i18nHelp = {
       fr: 'Aide des paramètres',
       de: 'Einstellungen Hilfe',
       es: 'Ayuda de configuración',
+      ja: '設定ヘルプ',               // Japanese
       pt: 'Ajuda de configurações',
       ru: 'Помощь по настройкам',
       nl: 'Instellingen help',
@@ -765,6 +851,7 @@ const i18nHelp = {
       fr: 'Guide d\'utilisation',
       de: 'Benutzerhandbuch',
       es: 'Guía de uso',
+      ja: '使用ガイド',               // Japanese
       pt: 'Guia de uso',
       ru: 'Руководство пользователя',
       nl: 'Gebruikershandleiding',
@@ -777,6 +864,7 @@ const i18nHelp = {
       fr: 'FAQ des enregistrements eBird',
       de: 'eBird Datensatz FAQ',
       es: 'Preguntas frecuentes sobre los registros de eBird',
+      ja: 'eBird記録FAQ',             // Japanese
       pt: 'FAQ de Registros do eBird',
       ru: 'Часто задаваемые вопросы о записях eBird',
       nl: 'eBird Record FAQ',
@@ -789,6 +877,7 @@ const i18nHelp = {
       fr: 'Rejoindre la communauté des utilisateurs de Chirpity',
       de: 'Treten Sie der Chirpity-Benutzergemeinschaft bei',
       es: 'Únete a la comunidad de usuarios de Chirpity',
+      ja: 'Chirpityユーザーコミュニティに参加する', // Japanese
       pt: 'Junte-se à comunidade de usuários do Chirpity',
       ru: 'Присоединиться к сообществу пользователей Chirpity',
       nl: 'Word lid van de Chirpity-gebruikersgemeenschap',
@@ -839,6 +928,14 @@ const i18nLocation = {
         'Ajouter, modifier ou supprimer un emplacement', 
         'Mettre à jour TOUS les fichiers ouverts à cet emplacement',
         "Lat:", "Long:"
+    ],
+    ja: [
+        '位置を設定', 
+        '位置を削除', 
+        '保存された位置を選択', 
+        '位置を追加、編集、または削除', 
+        'すべての開いているファイルをこの位置に更新',
+        "緯度:", "経度:"
     ],
     nl: [
         'Locatie instellen', 
@@ -898,7 +995,8 @@ const i18nContext = {
         time: 'Amend File Start Time',
         frequency: 'Frequency',
         length: "Region Length",
-        plural: 's'
+        plural: 's',
+        gotoTimeOfDay: 'Go to Time', gotoPosition: 'Go to Timecode'
     },
     da: {
         lastNight: 'I går nat', thisWeek: 'Denne uge', lastWeek: 'Sidste uge', thisMonth: 'Denne måned', lastMonth: 'Sidste måned', thisYear: 'Dette år', lastYear: 'Sidste år',
@@ -915,7 +1013,8 @@ const i18nContext = {
         time: 'Rediger filens starttid',
         plural: 'er',
         frequency: "Frekvens",
-        length: "Regionslængde"
+        length: "Regionslængde",
+        gotoTimeOfDay: 'Gå til tid', gotoPosition: 'Gå til tidskode' 
     },
     de: {
         lastNight: 'Letzte Nacht', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', thisMonth: 'Dieser Monat', lastMonth: 'Letzter Monat', thisYear: 'Dieses Jahr', lastYear: 'Letztes Jahr',
@@ -932,7 +1031,8 @@ const i18nContext = {
         time: 'Startzeit der Datei ändern',
         plural: 'e',
         frequency: "Frequenz",
-        length: "Regionlänge"
+        length: "Regionlänge",
+        gotoTimeOfDay: 'Gehe zur Zeit', gotoPosition: 'Gehe zur Zeitcode' 
     },
     es: {
         lastNight: 'Anoche', thisWeek: 'Esta semana', lastWeek: 'La semana pasada', thisMonth: 'Este mes', lastMonth: 'El mes pasado', thisYear: 'Este año', lastYear: 'El año pasado',
@@ -949,7 +1049,8 @@ const i18nContext = {
         time: 'Modificar la hora de inicio del archivo',
         plural: 's',
         frequency: "Frecuencia",
-        length: "Longitud de la región"
+        length: "Longitud de la región",
+        gotoTimeOfDay: 'Ir a la hora', gotoPosition: 'Ir al código de tiempo'
     },
     fr: {
         lastNight: 'La nuit dernière', thisWeek: 'Cette semaine', lastWeek: 'La semaine dernière', thisMonth: 'Ce mois-ci', lastMonth: 'Le mois dernier', thisYear: 'Cette année', lastYear: 'L’année dernière',
@@ -966,7 +1067,26 @@ const i18nContext = {
         time: 'Modifier l’heure de début du fichier',
         plural: 's',
         frequency: "Fréquence",
-        length: "Longueur de la région"
+        length: "Longueur de la région",
+        gotoTimeOfDay: 'Aller à l’heure', gotoPosition: 'Aller au code temporel'
+    },
+    ja: {
+        lastNight: '昨夜', thisWeek: '今週', lastWeek: '先週', thisMonth: '今月', lastMonth: '先月', thisYear: '今年', lastYear: '昨年',
+        apply: '適用', cancel: 'キャンセル', filter: '日付フィルターを適用',
+        'nocturnal flight call': '夜間飛行コール', 'flight call': '飛行コール', call: 'コール', song: '歌',
+        play: '再生',
+        pause: '一時停止',
+        analyse: '分析',
+        create: '作成', edit: '編集', record: '記録',
+        export: 'オーディオクリップをエクスポート',
+        compare: '参照コールと比較',
+        delete: '記録を削除',
+        location: 'ファイルの録音場所を修正',
+        time: 'ファイルの開始時間を修正',
+        plural: '',
+        frequency: "周波数",
+        length: "領域の長さ",
+        gotoTimeOfDay: '時刻に移動', gotoPosition: 'タイムコードに移動'
     },
     nl: {
         lastNight: 'Gisteravond', thisWeek: 'Deze week', lastWeek: 'Vorige week', thisMonth: 'Deze maand', lastMonth: 'Vorige maand', thisYear: 'Dit jaar', lastYear: 'Vorig jaar',
@@ -983,7 +1103,8 @@ const i18nContext = {
         time: 'Starttijd van bestand aanpassen',
         plural: 'en',
         frequency: "Frequentie",
-        length: "Regiolengte"
+        length: "Regiolengte",
+        gotoTimeOfDay: 'Ga naar tijd', gotoPosition: 'Ga naar tijdcode'
     },
     pt: {
         lastNight: 'Ontem à noite', thisWeek: 'Esta semana', lastWeek: 'Semana passada', thisMonth: 'Este mês', lastMonth: 'Mês passado', thisYear: 'Este ano', lastYear: 'Ano passado',
@@ -1000,7 +1121,8 @@ const i18nContext = {
         time: 'Alterar horário de início do arquivo',
         plural: 's',
         frequency: "Frequência",
-        length: "Comprimento da região"
+        length: "Comprimento da região",
+        gotoTimeOfDay: 'Ir para a hora', gotoPosition: 'Ir para o código de tempo'
     },
     ru: {
         lastNight: 'Прошлой ночью', thisWeek: 'На этой неделе', lastWeek: 'На прошлой неделе', thisMonth: 'В этом месяце', lastMonth: 'В прошлом месяце', thisYear: 'В этом году', lastYear: 'В прошлом году',
@@ -1017,7 +1139,8 @@ const i18nContext = {
         time: 'Изменить время начала файла',
         plural: '',
         frequency: "Частота",
-        length: "Длина региона"
+        length: "Длина региона",
+        gotoTimeOfDay: 'Перейти ко времени', gotoPosition: 'Перейти к таймкоду'
     },
     sv: {
         lastNight: 'I går kväll', thisWeek: 'Denna vecka', lastWeek: 'Förra veckan', thisMonth: 'Denna månad', lastMonth: 'Förra månaden', thisYear: 'Det här året', lastYear: 'Förra året',
@@ -1034,7 +1157,8 @@ const i18nContext = {
         time: 'Ändra filens starttid',
         plural: 'er',
         frequency: "Frekvens",
-        length: "Regionlängd"
+        length: "Regionlängd",
+        gotoTimeOfDay: 'Gå till tid', gotoPosition: 'Gå till tidkod'
     },
     zh: {
         lastNight: '昨晚', thisWeek: '本周', lastWeek: '上周', thisMonth: '本月', lastMonth: '上月', thisYear: '今年', lastYear: '去年',
@@ -1051,7 +1175,8 @@ const i18nContext = {
         time: '修改文件开始时间',
         plural: '',
         frequency: "频率",
-        length: "区域长度"
+        length: "区域长度",
+        gotoTimeOfDay: '跳转到时间', gotoPosition: '跳转到时间码'
     }
 };
 
@@ -1061,6 +1186,7 @@ const i18nForm = {
     de: {submit: 'Absenden', cancel: 'Abbrechen', select: "Neues Datum und Uhrzeit auswählen:"},
     es: {submit: 'Enviar', cancel: 'Cancelar', select: "Seleccionar nueva fecha y hora:"},
     fr: {submit: 'Soumettre', cancel: 'Annuler', select: "Sélectionnez une nouvelle date et heure :"},
+    ja: {submit: '送信', cancel: 'キャンセル', select: "新しい日付と時間を選択:"},
     nl: {submit: 'Verzenden', cancel: 'Annuleren', select: "Selecteer een nieuwe datum en tijd:"},
     pt: {submit: 'Enviar', cancel: 'Cancelar', select: "Selecione uma nova data e hora:"},
     ru: {submit: 'Отправить', cancel: 'Отмена', select: "Выберите новую дату и время:"},
@@ -1103,6 +1229,13 @@ const i18nLIST_MAP = {
         birds: 'Recherche de tous les oiseaux',
         everything: 'Recherche de tout',
         custom: 'Utilisation d\'une liste personnalisée'
+    },
+    ja: {
+        location: 'あなたの地域の鳥を探しています',
+        nocturnal: '夜間のコールを探しています',
+        birds: 'すべての鳥を探しています',
+        everything: 'すべてを探しています',
+        custom: 'カスタムリストを使用しています'
     },
     // it: {
     //     location: 'Cercando uccelli nella tua regione',
@@ -1345,6 +1478,23 @@ const i18nTitles = {
         "clear-custom-list": "Cancella lista personalizzata",
         primaryLogoLink: "Visita il sito web di Chirpity"
     },
+    ja: {
+        filename: "右クリックしてファイルの開始時間または場所を更新",
+        controlsWrapper: "ドラッグしてスペクトログラムウィンドウのサイズを変更します。",
+        playToggle: "再生 / 一時停止 (スペースキー)",
+        zoomIn: "スペクトログラムをズームイン (ショートカットキー: + キー)",
+        zoomOut: "スペクトログラムをズームアウト (ショートカットキー: - キー)",
+        nocmigOn: "Nocmigモードオン",
+        nocmigOff: "Nocmigモードオフ",
+        audioFiltersOn: "オーディオフィルターが適用されました",
+        audioFiltersOff: "オーディオフィルターなし",
+        contextModeOn: "コンテキストモードが有効",
+        contextModeOff: "コンテキストモードが無効",
+        "frequency-range": "スペクトログラムの周波数範囲を調整",
+        "threshold-value": "予測信頼度のしきい値",
+        "clear-custom-list": "カスタムリストをクリア",
+        primaryLogoLink: "Chirpityのウェブサイトを訪問"
+    },
     pl: { // Also random! Polish
         filename: "Kliknij prawym przyciskiem myszy, aby zaktualizować czas rozpoczęcia lub lokalizację pliku",
       controlsWrapper: "Przeciągnij, aby zmienić rozmiar okna spektrogramu.",
@@ -1445,6 +1595,22 @@ const i18nTitles = {
         customListPH: "Aucune liste définie", 
         libraryLocationPH: "Aucun emplacement défini" 
     },
+    ja: {
+        location: '地域の鳥',
+        nocturnal: '夜間のコール',
+        birds: 'すべての鳥',
+        everything: 'すべて',
+        custom: 'カスタム',
+        timecode: 'タイムコード',
+        timeOfDay: '時刻',
+        ogg: '非可逆圧縮（推奨）',
+        flac: '可逆圧縮',
+        Global: "グローバル",
+        Europe: "ヨーロッパ",
+        Mediterranean: "地中海",
+        customListPH: 'カスタムリストが設定されていません',
+        libraryLocationPH: '場所が設定されていません'
+    },
     // it: {
     //     location: 'Uccelli locali',
     //     nocturnal: 'Uccelli notturni',
@@ -1541,6 +1707,19 @@ const i18nTitles = {
     }
 };
 
+const i18nLocate = {
+    en: { locate: 'Locate File', remove: 'Remove from archive' },
+    da: { locate: 'Find fil', remove: 'Fjern fra arkiv' },
+    de: { locate: 'Datei suchen', remove: 'Aus dem Archiv entfernen' },
+    es: { locate: 'Localizar archivo', remove: 'Eliminar del archivo' },
+    fr: { locate: 'Localiser le fichier', remove: 'Retirer de l’archive' },
+    ja: { locate: 'ファイルを探す', remove: 'アーカイブから削除' },
+    nl: { locate: 'Bestand zoeken', remove: 'Verwijderen uit archief' },
+    pt: { locate: 'Localizar arquivo', remove: 'Remover do arquivo' },
+    ru: { locate: 'Найти файл', remove: 'Удалить из архива' },
+    sv: { locate: 'Hitta fil', remove: 'Ta bort från arkiv' },
+    zh: { locate: '定位文件', remove: '从存档中删除' }
+};
 
 const i18nTour = {
     en: `
@@ -1837,7 +2016,7 @@ de: `
 
 `,
 es: `
-    <!-- Carousel items -->
+<!-- Carousel items -->
     <div class="carousel-item active">
         <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
         <div class="text-center pb-4">
@@ -1848,13 +2027,13 @@ es: `
     <div class="carousel-item" data-element-selector="#navbarSettings">
         <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
         <div class="text-start pb-4 ms-3">
-            <h5 class="text-center">Comenzando</h5>
+            <h5 class="text-center">Inicio</h5>
             <ol class="ps-5 ms-5">
                 <li>Primero, establezca su ubicación en el menú de configuración.</li>
                 <li>Luego, elija el modelo que mejor se adapte a sus necesidades:</li>
                 <ul>
-                    <li><b>Nocmig</b> está ajustado para la migración nocturna,<br> pero solo tiene aves de la lista británica</li>
-                    <li><b>BirdNET</b> está entrenado con especies de aves de todo el mundo</li>
+                    <li><b>Nocmig</b> está ajustado para la migración nocturna,<br> pero solo tiene aves de la lista británica.</li>
+                    <li><b>BirdNET</b> está entrenado con especies de aves de todo el mundo.</li>
                 </ul>
             </ol>
         </div>
@@ -1891,7 +2070,7 @@ es: `
         <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
         <div class="text-center pb-4">
             <h5>Registros guardados</h5>
-            <p>Puedee guardar registros para referencias futuras desde el menú de Registros. Aquí también encontrará las opciones de Gráfica y Explorar
+            <p>Puede guardar registros para referencias futuras en el menú de Registros. Aquí también encontrará las opciones de Gráfica y Explorar
                 de la aplicación, las cuales le permiten revisar las detecciones guardadas y ver gráficas de la aparición de especies a lo largo del tiempo.
             </p>
         </div>
@@ -1906,6 +2085,79 @@ es: `
 <a class="carousel-control-next" href="#carouselExample" role="button" data-bs-slide="next">
     <span class="carousel-control-next-icon" aria-hidden="true"></span>
     <span class="visually-hidden">Siguiente</span>
+</a>
+
+`,
+ja: `
+    <!-- Carousel items -->
+    <div class="carousel-item active">
+        <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
+        <div class="text-center pb-4">
+            <h5>Chirpity Nocmigへようこそ</h5>
+            <p>このツアーでは、アプリケーションの主要な機能のいくつかを紹介します。次の項目に進むには右矢印をクリックしてください</p>
+        </div>
+    </div>
+    <div class="carousel-item" data-element-selector="#navbarSettings">
+        <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
+        <div class="text-start pb-4 ms-3">
+            <h5 class="text-center">はじめに</h5>
+            <ol class="ps-5 ms-5">
+                <li>まず、設定メニューで場所を設定します。</li>
+                <li>次に、ニーズに最適なモデルを検討します：</li>
+                <ul>
+                    <li><b>Nocmig</b> は夜間移動に最適化されていますが、<br> 英国リストの鳥のみが含まれています</li>
+                    <li><b>BirdNET</b> は世界中の鳥の種に対応しています</li>
+                </ul>
+            </ol>
+        </div>
+    </div>
+    <div class="carousel-item" data-element-selector="#filter-panel">
+        <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
+        <div class="text-center pb-4">
+            <h5>クイックアクセス設定パネル</h5>
+            <p>ここにあるアイコンを使用して、頻繁に使用する設定をすばやく切り替えることができます。</p>
+            これらには以下が含まれます：
+            <div class="w-75 ms-5">
+                <ol class="text-start ps-5"> 
+                    <li>Nocmigモード</li>
+                    <li>オーディオフィルター</li>
+                    <li>コンテキスト認識モード（Nocmigモデルのみ）</li>
+                    <li>スペクトログラムの周波数範囲の調整</li>
+                    <li>使用する検出リスト</li>
+                    <li>信頼度のしきい値</li>
+                </ol>
+            </div>
+            <p>これらの設定の説明は、ヘルプメニューの「設定」で確認できます。</p>
+        </div>
+    </div>
+    <div class="carousel-item" data-element-selector="#fileContainer">
+        <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
+        <div class="text-center pb-4">
+            <h5>コンテキストメニュー</h5>
+            <p>ほとんどのツールはコンテキストメニューからアクセスできます。これらはマウスの右クリックで表示されます。
+                検出、スペクトログラム上の選択領域、ファイル名のコンテキストメニューがあります。
+            </p>
+        </div>
+    </div>
+    <div class="carousel-item" data-element-selector="#navbarRecords">
+        <img src="img/logo/chirpity_logo2.png" class="w-100 rounded pb-4" alt="Chirpity Nocmig">
+        <div class="text-center pb-4">
+            <h5>保存された記録</h5>
+            <p>記録メニューから将来の参照用に記録を保存できます。ここには、アプリケーションのチャートと探索セクションもあります。
+                これらは、保存した検出を再訪し、種の出現のチャートを時間とともに表示することができます。
+            </p>
+        </div>
+    </div>
+    <!-- 必要に応じてさらにカルーセル項目を追加 -->
+</div>
+<!-- カルーセルナビゲーションコントロール -->
+<a class="carousel-control-prev" href="#carouselExample" role="button" data-bs-slide="prev">
+    <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+    <span class="visually-hidden">前へ</span>
+</a>
+<a class="carousel-control-next" href="#carouselExample" role="button" data-bs-slide="next">
+    <span class="carousel-control-next-icon" aria-hidden="true"></span>
+    <span class="visually-hidden">次へ</span>
 </a>
 `,
 nl: `
@@ -2051,7 +2303,6 @@ pt:`
     <span class="carousel-control-next-icon" aria-hidden="true"></span>
     <span class="visually-hidden">Próximo</span>
 </a>
-
 `,
 ru: `
     <!-- Carousel items -->
@@ -2268,7 +2519,6 @@ zh: `
     <span class="carousel-control-next-icon" aria-hidden="true"></span>
     <span class="visually-hidden">下一页</span>
 </a>
-
 `
 }
 
@@ -2368,6 +2618,25 @@ const i18nSpeciesList = {
         <table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>Nom commun</th><th>Nom scientifique</th></tr></thead><tbody>${includedList}</tbody></table>',
         excluded: '<br/><p>En revanche, l’application n’affichera pas de détections parmi les ${excludedCount} classes suivantes :</p><table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>${cname}</th><th>${sname}</th></tr></thead><tbody>${excludedList}</tbody></table>'
     },
+    ja: {
+        title: '現在の種リスト', 
+        includedButton: '含まれる', 
+        excludedButton: '除外される', 
+        cname: '一般名', 
+        sname: '学名',
+        localBirds: ' <b>地元の鳥</b>に限定',
+        week: '。現在のファイルは第 <b>${week}</b> 週に保存されました',
+        weekSpecific: '週ごとの',
+        threshold: '週ごとの種フィルターのしきい値 <b>${speciesThreshold}</b>',
+        location: ' <b>${place}</b> に焦点を当て、${species_filter_text}${current_file_text}',
+        depending: '、分析するファイルの日付に依存します',
+        upTo: ' 最大 ',
+        included: '<br/><p>検出された種の数は、モデル、使用されているリスト、および場所フィルターの場合、種フィルターのしきい値と録音が行われた週に依存します。<p>\
+        あなたは <b>${model}</b> モデルと <b>${listInUse}</b> リストを使用しています${localBirdsOnly}${location_filter_text}。これらの設定では、Chirpity は最大 ${upTo} \
+        <b>${count}</b> クラスの検出を表示します${depending}：</p>\
+        <table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>一般名</th><th>学名</th></tr></thead><tbody>${includedList}</tbody></table>',
+        excluded: '<br/><p>逆に、アプリケーションは次の ${excludedCount} クラスの検出を表示しません：</p><table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>${cname}</th><th>${sname}</th></tr></thead><tbody>${excludedList}</tbody></table>'
+    },
     nl: {
         title: 'Huidige soortenlijst', 
         includedButton: 'Inbegrepen', 
@@ -2464,7 +2733,7 @@ const i18nSpeciesList = {
         excluded: '<br/><p>另一方面，应用程序不会显示以下 ${excludedCount} 类别的检测结果：</p><table class="table table-striped"><thead class="sticky-top text-bg-dark"><tr><th>${cname}</th><th>${sname}</th></tr></thead><tbody>${excludedList}</tbody></table>'
     }
 };
-    
+
 const IUCNLabel = {
     da: {
         'NA': 'Ingen data',
@@ -2520,6 +2789,17 @@ const IUCNLabel = {
         'CR': 'En danger critique',
         'EW': 'Éteint à l’état sauvage',
         'EX': 'Éteint'
+    },
+    ja: {
+        'NA': 'データなし',
+        'DD': 'データ不足',
+        'LC': '低懸念',
+        'VU': '危急',
+        'NT': '近危急',
+        'EN': '絶滅危惧',
+        'CR': '深刻な絶滅危惧',
+        'EW': '野生絶滅',
+        'EX': '絶滅'
     },
     nl: {
         'NA': 'Geen gegevens',
@@ -2590,7 +2870,6 @@ const IUCNLabel = {
 };
 
 async function localiseUI(locale) {
-    let t0 = Date.now();
     locale = locale.replace(/_.*$/, '');
     try {
          // Try fetching the localisation JSON file
@@ -2702,11 +2981,10 @@ async function localiseUI(locale) {
         // Tour Carousel items:
         const tour = document.querySelector('.carousel-inner');
         tour.innerHTML = i18nTour[locale];
-        console.warn('Translation', `${Date.now() - t0} ms`)
         return localisationData
     } catch (error) {
         console.error('Localisation Error:', error.message);
     }
 }
 
-export {i18nSpeciesList,i18nHeadings, i18nContext, i18nLocation, i18nForm, i18nHelp, i18nToasts, i18nTitles, i18nLIST_MAP, i18nLists, IUCNLabel, localiseUI}
+export {i18nAll, i18nSpeciesList,i18nHeadings, i18nContext, i18nLocation, i18nForm, i18nHelp, i18nToasts, i18nTitles, i18nLIST_MAP, i18nLists, IUCNLabel, i18nLocate, localiseUI}

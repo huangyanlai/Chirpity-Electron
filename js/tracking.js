@@ -24,7 +24,7 @@ function trackVisit(config){
             &dimension1=${config.model}
             &dimension2=${config.list}
             &dimension3=${config.useWeek}
-            &dimension4=${config[config.model].locale}
+            &dimension4=${config.locale}
             &dimension5=${config.speciesThreshold}
             &dimension6=${JSON.stringify(config.filters)}
             &dimension7=${JSON.stringify(config.audio)}
@@ -55,7 +55,7 @@ function sendHeartbeat() {
     }).then(() => {
         console.log('Heartbeat sent');
     }).catch(error => {
-        console.error('Error sending heartbeat:', error);
+        console.log('Error sending heartbeat:', error);
     });
 }
 export {trackEvent, trackVisit}
