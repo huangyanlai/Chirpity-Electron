@@ -15,6 +15,7 @@ class BaseModel {
     this.width = undefined;
     this.config = { sampleRate: 24_000, specLength: 3, sigmoid: 1 };
     this.chunkLength = this.config.sampleRate * this.config.specLength;
+    this.overlap = 0;
     this.model_loaded = false;
     this.frame_length = 512;
     this.frame_step = 186;
@@ -149,28 +150,40 @@ class BaseModel {
   }
 
   padAudio = (audio) => {
-    const remainder = audio.length % this.chunkLength;
-    if (remainder) {
-      // Create a new array with the desired length
-      const paddedAudio = new Float32Array(
-        audio.length + (this.chunkLength - remainder)
-      );
-      // Copy the existing values into the new array
+    const step = this.chunkLength - (this.overlap * this.config.sampleRate);
+    const totalChunks = Math.ceil((audio.length - this.chunkLength) / step) + 1;
+    const requiredLength = (totalChunks - 1) * step + this.chunkLength;
+  
+    if (audio.length < requiredLength) {
+      const paddedAudio = new Float32Array(requiredLength);
       paddedAudio.set(audio);
       return paddedAudio;
-    } else return audio;
+    } else {
+      return audio;
+    }
   };
 
   createAudioTensorBatch = (audio) => {
     return tf.tidy(() => {
-      audio = this.padAudio(audio);
-      const numSamples = audio.length / this.chunkLength;
-      audio = tf.tensor1d(audio);
-      return [tf.reshape(audio, [numSamples, this.chunkLength]), numSamples];
+      audio = this.padAudio(audio); // Make sure it's padded appropriately
+      const step = this.chunkLength - (this.overlap * this.config.sampleRate);
+      const totalLength = audio.length;
+  
+      // Convert to tensor
+      const audioTensor = tf.tensor1d(audio);
+  
+      const chunks = [];
+      for (let start = 0; start + this.chunkLength <= totalLength; start += step) {
+        const chunk = audioTensor.slice(start, this.chunkLength);
+        chunks.push(chunk);
+      }
+  
+      const batch = tf.stack(chunks);
+      return [batch, chunks.length];
     });
   };
 
   getKeys = (numSamples, start) =>
-    [...Array(numSamples).keys()].map((i) => start + this.chunkLength * i);
+    [...Array(numSamples).keys()].map((i) => start + (this.chunkLength - (this.overlap * this.config.sampleRate)) * i);
 }
 export { BaseModel };

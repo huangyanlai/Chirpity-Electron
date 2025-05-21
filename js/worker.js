@@ -2037,17 +2037,19 @@ const getPredictBuffers = async ({ file = "", start = 0, end = undefined }) => {
   }
 
   const duration = end - start;
-  batchChunksToSend[file] = Math.ceil(duration / (BATCH_SIZE * WINDOW_SIZE));
+  const overlap = STATE.detect.overlap || 0;
+  const windowLength = WINDOW_SIZE - overlap;
+  batchChunksToSend[file] = Math.ceil(duration / (BATCH_SIZE * windowLength));
   predictionsReceived[file] = 0;
   predictionsRequested[file] = 0;
 
-  const batchDuration = BATCH_SIZE * WINDOW_SIZE;
+  const batchDuration = BATCH_SIZE * windowLength;
   //reduce highWaterMark for small analyses
-  const samplesInWindow = sampleRate * WINDOW_SIZE;
+  const samplesInWindow = sampleRate * windowLength;
   let samplesInBatch;
   if (end && end - start < batchDuration) {
     const audioDuration = end - start;
-    samplesInBatch = Math.ceil(audioDuration / WINDOW_SIZE) * samplesInWindow;
+    samplesInBatch = Math.ceil(audioDuration / windowLength) * samplesInWindow;
   } else {
     samplesInBatch = samplesInWindow * BATCH_SIZE;
   }
