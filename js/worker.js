@@ -2036,7 +2036,7 @@ const getPredictBuffers = async ({ file = "", start = 0, end = undefined }) => {
   }
 
   const duration = end - start;
-  const overlap = STATE.detect.overlap || 0;
+  const overlap = STATE.detect.overlap;
   const windowLength = WINDOW_SIZE - overlap;
   batchChunksToSend[file] = Math.ceil(duration / (BATCH_SIZE * windowLength));
   predictionsReceived[file] = 0;
@@ -3219,6 +3219,13 @@ const generateInsertQuery = async (keysArray, speciesIDBatch, confidenceBatch, f
 
 };
 
+function flatSigmoid(p, sensitivity = STATE.detect.sensitivity) {
+  if (sensitivity === 1 || p >= 1000  || p === 0 ) return p;
+  p /= 1000;
+  const adjusted =  Math.pow(p, 1 / sensitivity**3);
+  return  adjusted * 1000;
+}
+
 
 const parsePredictions = async (response) => {
   const file = response.file;
@@ -3249,7 +3256,7 @@ const parsePredictions = async (response) => {
       const speciesIDArray = speciesIDBatch[i];
       for (let j = 0; j < confidenceArray.length; j++) {
         let confidence = Math.round(confidenceArray[j] * 1000);
-        if (confidence < loopConfidence) break;
+        if (flatSigmoid(confidence) < loopConfidence) break;
         const species = speciesIDArray[j]
         let speciesID = STATE.speciesMap.get(modelID).get(species);
         updateUI = selection || !included.length || included.includes(speciesID);
@@ -3591,9 +3598,13 @@ const getSummary = async ({
   action,
 } = {}) => {
   const {sql, params} = await prepSummaryStatement();
-  const offset = species ? STATE.filteredOffset[species] : STATE.globalOffset;
+  const {filteredOffset, globalOffset, db, detect} = STATE;
+  const offset = species ? filteredOffset[species] : globalOffset;
 
-  const summary = await STATE.db.allAsync(sql, ...params);
+  let summary = await db.allAsync(sql, ...params);
+  // if (detect.sensitivity !== 1) {
+  //   summary = summary.map(r => ({ ...r, max: flatSigmoid(r.max) }));
+  // }
   if (format){ // Export called
     await exportData(summary, path, format, headers);
   } else {
@@ -3694,9 +3705,11 @@ const getResults = async ({
       } else if (species && STATE.mode !== "explore") {
         // get a number for the circle
         const { count } = await STATE.db.getAsync(
-          `SELECT COUNT(*) as count FROM records WHERE dateTime = ?
+          `SELECT COUNT(*) as count FROM records 
+                WHERE dateTime >= ? AND datetime < ?
                 AND confidence >= ? and fileID = ?`,
           r.timestamp,
+          r.timestamp + ((r.end - r.position) * 1000),
           confidence,
           r.fileID
         );
@@ -3896,6 +3909,7 @@ async function exportData(result, filename, format, headers) {
 
 const sendResult = (index, result, fromDBQuery) => {
   if (!fromDBQuery) {result.model = STATE.model, result.modelID = STATE.modelID};
+  result.score = flatSigmoid(result.score)
   UI.postMessage({
     event: "new-result",
     file: result.file,
@@ -4718,7 +4732,7 @@ async function setIncludedIDs(lat, lon, week) {
     messages.forEach((message) => {
       message.model = message.model.replace("chirpity", "Nocmig");
       generateAlert({
-        type: "warning",
+        type: "error",
         message: "noSnameFound",
         variables: {
           sname: message.sname,

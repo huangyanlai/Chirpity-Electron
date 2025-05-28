@@ -299,79 +299,81 @@ tf.serialization.registerClass(MelSpecLayerSimple);
 //     y = tf.add(tf.div(y, sharpness), xmax2);
 //     return y
 // }
-function logmeanexp(x, axis, keepdims, sharpness) {
-  return tf.add(
-    tf.div(
-      tf.log(
-        tf.mean(
-          tf.exp(x.mul(sharpness, x.sub(tf.max(x, axis, true)))),
-          axis,
-          keepdims
-        )
-      ),
-      sharpness
-    ),
-    tf.max(x, axis, keepdims)
-  );
-}
-class GlobalLogExpPooling2D extends tf.layers.Layer {
-  constructor(config) {
-    super(config);
-  }
 
-  build(inputShape) {
-    this.sharpness = this.addWeight(
-      "sharpness",
-      [1],
-      "float32",
-      tf.initializers.constant({ value: 2 })
-    );
-  }
+// function logmeanexp(x, axis, keepdims, sharpness) {
+//   return tf.add(
+//     tf.div(
+//       tf.log(
+//         tf.mean(
+//           tf.exp(x.mul(sharpness, x.sub(tf.max(x, axis, true)))),
+//           axis,
+//           keepdims
+//         )
+//       ),
+//       sharpness
+//     ),
+//     tf.max(x, axis, keepdims)
+//   );
+// }
+// class GlobalLogExpPooling2D extends tf.layers.Layer {
+//   constructor(config) {
+//     super(config);
+//   }
 
-  computeOutputShape(inputShape) {
-    return [inputShape[0], inputShape[3]];
-  }
+//   build(inputShape) {
+//     this.sharpness = this.addWeight(
+//       "sharpness",
+//       [1],
+//       "float32",
+//       tf.initializers.constant({ value: 2 })
+//     );
+//   }
 
-  call(input, kwargs) {
-    return logmeanexp(input[0], [1, 2], false, this.sharpness.read()); //.read().dataSync()[0]);
-  }
+//   computeOutputShape(inputShape) {
+//     return [inputShape[0], inputShape[3]];
+//   }
 
-  static get className() {
-    return "GlobalLogExpPooling2D";
-  }
-}
+//   call(input, kwargs) {
+//     return logmeanexp(input[0], [1, 2], false, this.sharpness.read()); //.read().dataSync()[0]);
+//   }
 
-tf.serialization.registerClass(GlobalLogExpPooling2D);
+//   static get className() {
+//     return "GlobalLogExpPooling2D";
+//   }
+// }
+
+// tf.serialization.registerClass(GlobalLogExpPooling2D);
 
 /////////////////////////  Build Sigmoid Layer  /////////////////////////
-class SigmoidLayer extends tf.layers.Layer {
-  constructor(config) {
-    super(config);
-    this.config = config;
-  }
+// class SigmoidLayer extends tf.layers.Layer {
+//   constructor(config) {
+//     super(config);
+//     this.config = config;
+//   }
 
-  build(inputShape) {
-    this.kernel = this.addWeight(
-      "scale_factor",
-      [1],
-      "float32",
-      tf.initializers.constant({ value: 1 })
-    );
-  }
+//   build(inputShape) {
+//     this.kernel = this.addWeight(
+//       "scale_factor",
+//       [1],
+//       "float32",
+//       tf.initializers.constant({ value: 1 })
+//     );
+//   }
 
-  computeOutputShape(inputShape) {
-    return inputShape;
-  }
+//   computeOutputShape(inputShape) {
+//     return inputShape;
+//   }
 
-  call(input, kwargs) {
-    // Since sigmoid is always 1, we simplify here
-    //return tf.sigmoid(tf.mul(input[0], CONFIG.sigmoid))
-    return tf.sigmoid(input[0]);
-  }
+//   call(input, kwargs) {
+//     // Since sigmoid is always 1, we simplify here
+//     //return tf.sigmoid(tf.mul(input[0], CONFIG.sigmoid))
+//     console.log('in sigmoid layer')
+//     return tf.sigmoid(input[0]);
+//   }
 
-  static get className() {
-    return "SigmoidLayer";
-  }
-}
+//   static get className() {
+//     return "SigmoidLayer";
+//   }
+// }
 
-tf.serialization.registerClass(SigmoidLayer);
+// tf.serialization.registerClass(SigmoidLayer);

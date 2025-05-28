@@ -1826,6 +1826,8 @@ const defaultConfig = {
     merge: false,
     combine: false,
     confidence: 45,
+    overlap: 0,
+    sensitivity: 1,
     iucn: true,
     iucnScope: "Global",
   },
@@ -2056,12 +2058,19 @@ window.onload = async () => {
     DOM.audioPadding.checked = config.audio.padding;
     DOM.audioFade.disabled = !DOM.audioPadding.checked;
     DOM.audioDownmix.checked = config.audio.downmix;
-    setNocmig(config.detect.nocmig);
-    document.getElementById("merge-detections").checked = config.detect.merge;
-    document.getElementById("combine-detections").checked = config.detect.combine;
-    document.getElementById("auto-load").checked = config.detect.autoLoad;
-    document.getElementById("iucn").checked = config.detect.iucn;
-    document.getElementById("iucn-scope").selected = config.detect.iucnScope;
+    // Detections settings
+    const {merge, combine, autoLoad, iucn, iucnScope, confidence, overlap, sensitivity, nocmig} = config.detect;
+    setNocmig(nocmig);
+    document.getElementById("merge-detections").checked = merge;
+    document.getElementById("combine-detections").checked = combine;
+    document.getElementById("auto-load").checked = autoLoad;
+    document.getElementById("iucn").checked = iucn;
+    document.getElementById("iucn-scope").selected = iucnScope;
+    document.getElementById("overlap").value = overlap;
+    document.getElementById("overlap-value").textContent = overlap;
+    // document.getElementById("sensitivity").value = sensitivity;
+    // document.getElementById("sensitivity-value").textContent = sensitivity;
+    showThreshold(confidence);
     handleModelChange(config.model, false)
     // Block powersave?
     document.getElementById("power-save-block").checked =
@@ -2070,14 +2079,8 @@ window.onload = async () => {
 
     contextAwareIconDisplay();
     DOM.debugMode.checked = config.debug;
-    showThreshold(config.detect.confidence);
-    // SNRSlider.value = config.filters.SNR;
-    // SNRThreshold.textContent = config.filters.SNR;
-    // if (config[config.model].backend === 'webgl' || config[config.model].backend === 'webgpu') {
-    //     SNRSlider.disabled = true;
-    // };
-
-    // Filters
+    
+    // Audio Filters
     document.getElementById("HP-threshold").textContent = formatHz(config.filters.highPassFrequency);
     document.getElementById("highPassFrequency").value = config.filters.highPassFrequency;
     const lowPass = document.getElementById("lowPassFrequency")
@@ -4832,6 +4835,14 @@ document.addEventListener('input', (e) =>{
       showThreshold(e)
       break;
     }
+    case "overlap": {
+      updateDisplay(el, "overlap-value");
+      break;
+    }
+    case "sensitivity": {
+      updateDisplay(el, "sensitivity-value");
+      break;
+    }
     case "thread-slider": {
       DOM.numberOfThreads.textContent = DOM.threadSlider.value;
     }
@@ -5678,6 +5689,22 @@ document.addEventListener("change", async function (e) {
         case "confidenceValue":
         case "confidence": {
           handleThresholdChange(e);
+          break;
+        }
+        case "sensitivity":{
+          config.detect.sensitivity = element.valueAsNumber;
+          worker.postMessage({
+            action: "update-state",
+            detect: config.detect,
+          });
+          break;
+        }
+        case "overlap":{
+          config.detect.overlap = element.valueAsNumber;
+          worker.postMessage({
+            action: "update-state",
+            detect: config.detect,
+          });
           break;
         }
         case "context": {

@@ -581,6 +581,26 @@
                         </div>
                     </div>
                     <div class="advanced">
+                        <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="hover" data-bs-title="Overlap" id="Overlap-circle-help"  data-bs-content="Determines the number of seconds overlap between successive analysis windows. N.B. Non-zero values will produce duplicate results and increase false positives.">?</a>
+                        <div class="form-group rounded p-2 pe-0 mb-2">
+                            <label for="overlap">Overlap:</label>
+                            <div class="input-group">
+                                <input type="range" class="form-control-range w-75" id="overlap" min="0" max="2.5" step="0.5">
+                                <div class="input-group-append">
+                                    <span class="input-group-text" id="overlap-value">0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="hover" data-bs-title="Sensitivity" id="Sensitivity-circle-help"  data-bs-content="Adjusts the distribution of prediction scores. Values greater than 1 will increase the confidence of high confidence results whilst reducing the confidence of low confidence results. Values less than 1 will do the opposite.">?</a>
+                        <div class="form-group rounded p-2 pe-0 mb-2">
+                            <label for="sensitivity">Sensitivity:</label>
+                            <div class="input-group">
+                                <input type="range" class="form-control-range w-75" id="sensitivity" min="0.5" max="1.5" step="0.01">
+                                <div class="input-group-append">
+                                    <span class="input-group-text" id="sensitivity-value">1</span>
+                                </div>
+                            </div>
+                        </div> -->
                         <div class="p-0 chirpity-only node-only d-none">
                             <div class="form-group rounded p-2 pe-0 mb-2">
                                 <a class="circle" tabindex="-1" data-bs-toggle="popover" data-bs-trigger="hover" data-bs-title="Backend" id="Backend-circle-help"  data-bs-content="The webGL/webGPU backends can improve performance and reduce power consumption on some systems.">?</a>
