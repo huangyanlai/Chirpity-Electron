@@ -423,6 +423,12 @@ const DOM = {
     }
     return this._threadSlider;
   },
+  get overlapSlider() {
+    if (!this._overlapSlider) {
+      this._overlapSlider = document.getElementById("overlap");
+    }
+    return this._overlapSlider;
+  },
   get timelineSetting() {
     if (!this._timelineSetting) {
       this._timelineSetting = document.getElementById("timelineSetting");

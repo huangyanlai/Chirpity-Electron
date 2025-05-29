@@ -6,6 +6,7 @@ try {
   require("@tensorflow/tfjs-backend-webgpu");
   BACKEND = "webgpu";
 }
+import { BaseModel } from "./BaseModel.js";  
 const fs = require("node:fs");
 const path = require("node:path");
 let DEBUG = false;
@@ -195,80 +196,11 @@ onmessage = async (e) => {
   }
 };
 
-class Model {
+class Model extends BaseModel{
   constructor(appPath, version) {
-    this.model = undefined;
-    this.labels = undefined;
-    this.height = undefined;
-    this.width = undefined;
-    this.config = CONFIG;
-    this.chunkLength = this.config.sampleRate * this.config.specLength;
-    this.model_loaded = false;
-    this.frame_length = 512;
-    this.frame_step = 186;
-    this.appPath = appPath;
-    this.useContext = undefined;
-    this.version = version;
-    this.selection = false;
+    super(appPath, version);
   }
 
-  async loadModel() {
-    if (this.model_loaded === false) {
-      // Model files must be in a different folder than the js, assets files
-      if (DEBUG) console.log("loading model from", this.appPath + "model.json");
-      this.model = await tf.loadGraphModel(this.appPath + "model.json", {
-        weightPathPrefix: this.appPath,
-      });
-      this.model_loaded = true;
-      this.inputShape = [...this.model.inputs[0].shape];
-    }
-  }
-
-  async warmUp(batchSize) {
-    this.batchSize = parseInt(batchSize);
-    this.inputShape[0] = this.batchSize;
-    DEBUG && console.log("WarmUp begin", tf.memory().numTensors);
-    const input = tf.zeros(this.inputShape);
-
-    // Parallel compilation for faster warmup
-    // https://github.com/tensorflow/tfjs/pull/7755/files#diff-a70aa640d286e39c922aa79fc636e610cae6e3a50dd75b3960d0acbe543c3a49R316
-    if (tf.getBackend() === "webgl") {
-      tf.env().set("ENGINE_COMPILE_ONLY", true);
-      const compileRes = this.model.predict(input, {
-        batchSize: this.batchSize,
-      });
-      tf.env().set("ENGINE_COMPILE_ONLY", false);
-      await tf.backend().checkCompileCompletionAsync();
-      tf.backend().getUniformLocations();
-      tf.dispose(compileRes);
-      input.dispose();
-    } else if (tf.getBackend() === "webgpu") {
-      tf.env().set("WEBGPU_ENGINE_COMPILE_ONLY", true);
-      const compileRes = this.model.predict(input, {
-        batchSize: this.batchSize,
-      });
-      tf.env().set("WEBGPU_ENGINE_COMPILE_ONLY", false);
-      await tf.backend().checkCompileCompletionAsync();
-      tf.dispose(compileRes);
-    }
-    input.dispose();
-    DEBUG && console.log("WarmUp end", tf.memory().numTensors);
-    return true;
-  }
-
-  normalise(spec) {
-    return tf.tidy(() => {
-      const spec_max = tf.max(spec, [1, 2], true);
-      // if (this.version === 'v4'){
-      //     const spec_min = tf.min(spec, [1, 2], true)
-      //     spec = tf.sub(spec, spec_min).div(tf.sub(spec_max, spec_min));
-      // } else {
-      spec = spec.mul(255);
-      spec = spec.div(spec_max);
-      // }
-      return spec;
-    });
-  }
 
   getSNR(spectrograms) {
     return tf.tidy(() => {
@@ -279,158 +211,107 @@ class Model {
     });
   }
 
-  padBatch(tensor) {
-    return tf.tidy(() => {
-      if (DEBUG)
-        console.log(
-          `Adding ${this.batchSize - tensor.shape[0]} tensors to the batch`
-        );
-      const shape = [...tensor.shape];
-      shape[0] = this.batchSize - shape[0];
-      const padding = tf.zeros(shape);
-      return tf.concat([tensor, padding], 0);
-    });
-  }
 
-  addContext(prediction, tensor, confidence) {
-    // Create a set of images from the batch, offset by half the width of the original images
-    const [_, height, width, channel] = tensor.shape;
-    return tf.tidy(() => {
-      const firstHalf = tensor.slice([0, 0, 0, 0], [-1, -1, width / 2, -1]);
-      const secondHalf = tensor.slice(
-        [0, 0, width / 2, 0],
-        [-1, -1, width / 2, -1]
-      );
-      const paddedSecondHalf = tf.concat(
-        [tf.zeros([1, height, width / 2, channel]), secondHalf],
-        0
-      );
-      secondHalf.dispose();
-      // prepend padding tensor
-      const [droppedSecondHalf, _] = paddedSecondHalf.split([
-        paddedSecondHalf.shape[0] - 1,
-        1,
-      ]); // pop last tensor
-      paddedSecondHalf.dispose();
-      const combined = tf.concat([droppedSecondHalf, firstHalf], 2); // concatenate adjacent pairs along the width dimension
-      firstHalf.dispose();
-      droppedSecondHalf.dispose();
-      const rshiftPrediction = this.model.predict(combined, {
-        batchSize: this.batchSize,
-      });
-      combined.dispose();
-      // now we have predictions for both the original and rolled images
-      const [padding, remainder] = tf.split(rshiftPrediction, [1, -1]);
-      const lshiftPrediction = tf.concat([remainder, padding]);
-      // Get the highest predictions from the overlapping images
-      const surround = tf.maximum(rshiftPrediction, lshiftPrediction);
-      lshiftPrediction.dispose();
-      rshiftPrediction.dispose();
-      // Mask out where these are below the threshold
-      const indices = tf.greater(surround, confidence);
-      return prediction.where(indices, 0);
-    });
-  }
 
-  async predictBatch(TensorBatch, keys, threshold, confidence) {
-    // const TensorBatch = this.fixUpSpecBatch(specs); // + 1 tensor
-    // specs.dispose(); // - 1 tensor
-    let paddedTensorBatch, maskedTensorBatch;
-    if (
-      BACKEND === "webgl" &&
-      TensorBatch.shape[0] < this.batchSize &&
-      !this.selection
-    ) {
-      // WebGL backend works best when all batches are the same size
-      paddedTensorBatch = this.padBatch(TensorBatch); // + 1 tensor
-    } else if (threshold && BACKEND === "tensorflow" && !this.selection) {
-    // This whole block is for SNR and currently unused
-      if (this.version !== "v1") threshold *= 4;
-      const keysTensor = tf.stack(keys); // + 1 tensor
-      const snr = this.getSNR(TensorBatch);
-      const condition = tf.greaterEqual(snr, threshold); // + 1 tensor
-      if (DEBUG) console.log("SNR is:", await snr.data());
-      snr.dispose();
-      // Avoid mask cannot be scalar error at end of predictions
-      let newCondition;
-      if (condition.rankType === "0") {
-        newCondition = tf.expandDims(condition); // + 1 tensor
-        condition.dispose(); // - 1 tensor
-      }
-      const c = newCondition || condition;
-      let maskedKeysTensor;
-      [maskedTensorBatch, maskedKeysTensor] = await Promise.all([
-        tf.booleanMaskAsync(TensorBatch, c),
-        tf.booleanMaskAsync(keysTensor, c),
-      ]); // + 2 tensor
-      c.dispose(); // - 1 tensor
-      keysTensor.dispose(); // - 1 tensor
+  // async predictBatch(TensorBatch, keys, threshold, confidence) {
+  //   // const TensorBatch = this.fixUpSpecBatch(specs); // + 1 tensor
+  //   // specs.dispose(); // - 1 tensor
+  //   let paddedTensorBatch, maskedTensorBatch;
+  //   if (
+  //     BACKEND === "webgl" &&
+  //     TensorBatch.shape[0] < this.batchSize &&
+  //     !this.selection
+  //   ) {
+  //     // WebGL backend works best when all batches are the same size
+  //     paddedTensorBatch = this.padBatch(TensorBatch); // + 1 tensor
+  //   } else if (threshold && BACKEND === "tensorflow" && !this.selection) {
+  //   // This whole block is for SNR and currently unused
+  //     if (this.version !== "v1") threshold *= 4;
+  //     const keysTensor = tf.stack(keys); // + 1 tensor
+  //     const snr = this.getSNR(TensorBatch);
+  //     const condition = tf.greaterEqual(snr, threshold); // + 1 tensor
+  //     if (DEBUG) console.log("SNR is:", await snr.data());
+  //     snr.dispose();
+  //     // Avoid mask cannot be scalar error at end of predictions
+  //     let newCondition;
+  //     if (condition.rankType === "0") {
+  //       newCondition = tf.expandDims(condition); // + 1 tensor
+  //       condition.dispose(); // - 1 tensor
+  //     }
+  //     const c = newCondition || condition;
+  //     let maskedKeysTensor;
+  //     [maskedTensorBatch, maskedKeysTensor] = await Promise.all([
+  //       tf.booleanMaskAsync(TensorBatch, c),
+  //       tf.booleanMaskAsync(keysTensor, c),
+  //     ]); // + 2 tensor
+  //     c.dispose(); // - 1 tensor
+  //     keysTensor.dispose(); // - 1 tensor
 
-      if (!maskedTensorBatch.size) {
-        maskedTensorBatch.dispose(); // - 1 tensor
-        maskedKeysTensor.dispose(); // - 1 tensor
-        TensorBatch.dispose(); // - 1 tensor
-        if (DEBUG)
-          console.log(
-            "No surviving tensors in batch",
-            maskedTensorBatch.shape[0]
-          );
-        return [];
-      } else {
-        keys = Array.from(await maskedKeysTensor.data());
-        maskedKeysTensor.dispose(); // - 1 tensor
-        if (DEBUG)
-          console.log("surviving tensors in batch", maskedTensorBatch.shape[0]);
-      }
-    }
+  //     if (!maskedTensorBatch.size) {
+  //       maskedTensorBatch.dispose(); // - 1 tensor
+  //       maskedKeysTensor.dispose(); // - 1 tensor
+  //       TensorBatch.dispose(); // - 1 tensor
+  //       if (DEBUG)
+  //         console.log(
+  //           "No surviving tensors in batch",
+  //           maskedTensorBatch.shape[0]
+  //         );
+  //       return [];
+  //     } else {
+  //       keys = Array.from(await maskedKeysTensor.data());
+  //       maskedKeysTensor.dispose(); // - 1 tensor
+  //       if (DEBUG)
+  //         console.log("surviving tensors in batch", maskedTensorBatch.shape[0]);
+  //     }
+  //   }
 
-    const tb = paddedTensorBatch || maskedTensorBatch || TensorBatch;
-    const rawPrediction = this.model.predict(tb, { batchSize: this.batchSize });
+  //   const tb = paddedTensorBatch || maskedTensorBatch || TensorBatch;
+  //   const rawPrediction = this.model.predict(tb, { batchSize: this.batchSize });
 
-    // Zero prediction values for silence
-    const zerosMask = tf.tidy(() => {
-      // Get the max value for each tensor in the batch
-      const maxValues = tb.max([1, 2]);
-      // Create a mask where max value is zero (true for tensors with max > 0)
-      return maxValues.notEqual(0);
-    });
-    // Set predictions to zero for the tensors where the max value was zero
-    const prediction = tf.tidy(() => {
-      return rawPrediction.mul(zerosMask);
-    });
-    // Dispose tensors after using them to avoid memory leaks
-    zerosMask.dispose();
-    rawPrediction.dispose();
+  //   // Zero prediction values for silence
+  //   const zerosMask = tf.tidy(() => {
+  //     // Get the max value for each tensor in the batch
+  //     const maxValues = tb.max([1, 2]);
+  //     // Create a mask where max value is zero (true for tensors with max > 0)
+  //     return maxValues.notEqual(0);
+  //   });
+  //   // Set predictions to zero for the tensors where the max value was zero
+  //   const prediction = tf.tidy(() => {
+  //     return rawPrediction.mul(zerosMask);
+  //   });
+  //   // Dispose tensors after using them to avoid memory leaks
+  //   zerosMask.dispose();
+  //   rawPrediction.dispose();
 
-    let newPrediction;
-    if (this.selection) {
-      newPrediction = tf.max(prediction, 0, true);
-      prediction.dispose();
-      keys = keys.splice(0, 1);
-    } else if (this.useContext && this.batchSize > 1 && threshold === 0) {
-      newPrediction = this.addContext(prediction, tb, confidence);
-      prediction.dispose();
-    }
-    TensorBatch.dispose();
-    if (paddedTensorBatch) paddedTensorBatch.dispose();
-    if (maskedTensorBatch) maskedTensorBatch.dispose();
+  //   let newPrediction;
+  //   if (this.selection) {
+  //     newPrediction = tf.max(prediction, 0, true);
+  //     prediction.dispose();
+  //     keys = keys.splice(0, 1);
+  //   } else if (this.useContext && this.batchSize > 1 && threshold === 0) {
+  //     newPrediction = this.addContext(prediction, tb, confidence);
+  //     prediction.dispose();
+  //   }
+  //   TensorBatch.dispose();
+  //   if (paddedTensorBatch) paddedTensorBatch.dispose();
+  //   if (maskedTensorBatch) maskedTensorBatch.dispose();
 
-    const finalRawPrediction = newPrediction || prediction;
-    const finalPrediction = finalRawPrediction.mul(this.mask);
-    finalRawPrediction.dispose();
-    const { indices, values } = tf.topk(finalPrediction, 5, true);
+  //   const finalRawPrediction = newPrediction || prediction;
+  //   const finalPrediction = finalRawPrediction.mul(this.mask);
+  //   finalRawPrediction.dispose();
+  //   const { indices, values } = tf.topk(finalPrediction, 5, true);
 
-    const [topIndices, topValues] = await Promise.all([
-      indices.array(),
-      values.array(),
-    ]).catch((err) => console.log("Data transfer error:", err));
-    indices.dispose();
-    values.dispose();
-    finalPrediction.dispose();
-    newPrediction && newPrediction.dispose();
-    keys = keys.map((key) => (key / CONFIG.sampleRate).toFixed(3));
-    return [keys, topIndices, topValues];
-  }
+  //   const [topIndices, topValues] = await Promise.all([
+  //     indices.array(),
+  //     values.array(),
+  //   ]).catch((err) => console.log("Data transfer error:", err));
+  //   indices.dispose();
+  //   values.dispose();
+  //   finalPrediction.dispose();
+  //   newPrediction && newPrediction.dispose();
+  //   keys = keys.map((key) => (key / CONFIG.sampleRate).toFixed(3));
+  //   return [keys, topIndices, topValues];
+  // }
 
   makeSpectrogram(signal) {
     return tf.tidy(() => {

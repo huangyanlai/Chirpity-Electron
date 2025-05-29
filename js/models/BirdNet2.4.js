@@ -24,6 +24,11 @@ onmessage = async (e) => {
         myModel.warmUp(e.data.batchSize);
         break;
       }
+      case "change-overlap": {
+        myModel.overlap = e.data.overlap;
+        DEBUG && console.log("Overlap changed to", myModel.overlap);
+        break;
+      }
       case "load": {
         const version = e.data.model;
         DEBUG && console.log("load request to worker");
@@ -35,6 +40,7 @@ onmessage = async (e) => {
         );
         const appPath = "../../" + location + "/";
         const batch = e.data.batchSize;
+        const overlap = e.data.overlap;
         const backend = BACKEND || e.data.backend;
         backend === "webgpu" && require("@tensorflow/tfjs-backend-webgpu");
         let labels;
@@ -68,16 +74,16 @@ onmessage = async (e) => {
           myModel.height = height;
           myModel.width = width;
           myModel.labels = labels;
+          myModel.overlap = overlap;
           await myModel.loadModel("layers");
           await myModel.warmUp(batch);
-          BACKEND = tf.getBackend();
           postMessage({
             message: "model-ready",
             sampleRate: myModel.config.sampleRate,
             chunkLength: myModel.chunkLength,
-            backend: BACKEND,
-            labels: labels,
-            worker: worker,
+            backend,
+            labels,
+            worker,
           });
         });
         break;

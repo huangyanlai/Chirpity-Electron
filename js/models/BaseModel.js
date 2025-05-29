@@ -72,8 +72,7 @@ class BaseModel {
     return true;
   }
 
-  normalise = (spec) =>
-    tf.tidy(() => spec.mul(255).div(spec.max([1, 2], true)));
+  normalise = (spec) => spec.mul(255).div(spec.max([1, 2], true));
 
   padBatch(tensor) {
     return tf.tidy(() => {
@@ -88,16 +87,98 @@ class BaseModel {
     });
   }
 
-  async predictBatch(audio, keys) {
+  addAudioContext(prediction, tensor, confidence) {
+    return tf.tidy(() => {
+      // Create a set of audio segments from the batch, offset by half the length of the original audio
+      const [batchSize, length] = tensor.shape;
+      const halfLength = Math.floor(length / 2);
+      const firstHalf = tensor.slice([0, 0], [-1, halfLength]);
+      const secondHalf = tensor.slice([0, halfLength], [-1, halfLength]);
+      const paddedSecondHalf = tf.concat(
+        [tf.zeros([batchSize, halfLength]), secondHalf],
+        1
+      );
+      secondHalf.dispose();
+      // prepend padding tensor
+      const [droppedSecondHalf, _] = paddedSecondHalf.split([
+        paddedSecondHalf.shape[0],
+        1,
+      ]); // pop last tensor
+      paddedSecondHalf.dispose();
+      const combined = tf.concat([droppedSecondHalf, firstHalf], 1); // concatenate adjacent pairs along the time dimension
+      firstHalf.dispose();
+      droppedSecondHalf.dispose();
+      const rshiftPrediction = this.model.predict(combined, {
+        batchSize: this.batchSize,
+      });
+      combined.dispose();
+      // now we have predictions for both the original and rolled audio segments
+      const [padding, remainder] = tf.split(rshiftPrediction, [1, -1]);
+      const lshiftPrediction = tf.concat([remainder, padding]);
+      // Get the highest predictions from the overlapping segments
+      const surround = tf.maximum(rshiftPrediction, lshiftPrediction);
+      lshiftPrediction.dispose();
+      rshiftPrediction.dispose();
+      // Mask out where these are below the threshold
+      const indices = tf.greater(surround, confidence);
+      return prediction.where(indices, 0);
+    });
+  }
+  addContext(prediction, tensor, confidence) {
+    if (tensor.shape.length < 4) {
+      return this.addAudioContext(prediction, tensor, confidence);
+    }
+    // Create a set of images from the batch, offset by half the width of the original images
+    const [_, height, width, channel] = tensor.shape;
+    return tf.tidy(() => {
+      const firstHalf = tensor.slice([0, 0, 0, 0], [-1, -1, width / 2, -1]);
+      const secondHalf = tensor.slice(
+        [0, 0, width / 2, 0],
+        [-1, -1, width / 2, -1]
+      );
+      const paddedSecondHalf = tf.concat(
+        [tf.zeros([1, height, width / 2, channel]), secondHalf],
+        0
+      );
+      secondHalf.dispose();
+      // prepend padding tensor
+      const [droppedSecondHalf, _] = paddedSecondHalf.split([
+        paddedSecondHalf.shape[0] - 1,
+        1,
+      ]); // pop last tensor
+      paddedSecondHalf.dispose();
+      const combined = tf.concat([droppedSecondHalf, firstHalf], 2); // concatenate adjacent pairs along the width dimension
+      firstHalf.dispose();
+      droppedSecondHalf.dispose();
+      const rshiftPrediction = this.model.predict(combined, {
+        batchSize: this.batchSize,
+      });
+      combined.dispose();
+      // now we have predictions for both the original and rolled images
+      const [padding, remainder] = tf.split(rshiftPrediction, [1, -1]);
+      const lshiftPrediction = tf.concat([remainder, padding]);
+      // Get the highest predictions from the overlapping images
+      const surround = tf.maximum(rshiftPrediction, lshiftPrediction);
+      lshiftPrediction.dispose();
+      rshiftPrediction.dispose();
+      // Mask out where these are below the threshold
+      const indices = tf.greater(surround, confidence);
+      return prediction.where(indices, 0);
+    });
+  }
+  async predictBatch(audio, keys, threshold, confidence) {
     const prediction = this.model.predict(audio, { batchSize: this.batchSize });
-    audio.dispose();
     let newPrediction;
     if (this.selection) {
       newPrediction = tf.max(prediction, 0, true);
       prediction.dispose();
       keys = keys.splice(0, 1);
+    } else if (this.useContext && this.batchSize > 1 ) {
+      newPrediction = this.addContext(prediction, audio, confidence);
+      prediction.dispose();
     }
 
+    audio.dispose();
     const finalPrediction = newPrediction || prediction;
 
     const { indices, values } = tf.topk(finalPrediction, 5, true);

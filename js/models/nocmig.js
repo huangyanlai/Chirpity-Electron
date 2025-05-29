@@ -73,6 +73,7 @@ function loadModel(params) {
 
     // myModel.mask = tf.tensor2d(Array.from({ length: 408 }, (_, i) => indexesToZero.includes(i) ? 0 : 1), [1, 408]);
     myModel.labels = labels;
+    myModel.overlap = params.overlap || 0;
     await myModel.loadModel();
     myModel.warmUp(batch);
     BACKEND = tf.getBackend();
@@ -94,6 +95,11 @@ onmessage = async (e) => {
     switch (modelRequest) {
       case "change-batch-size": {
         myModel.warmUp(e.data.batchSize);
+        break;
+      }
+      case "change-overlap": {
+        myModel.overlap = e.data.overlap;
+        DEBUG && console.log("Overlap changed to", myModel.overlap);
         break;
       }
       case "load": {

@@ -436,6 +436,17 @@ async function handleMessage(e) {
       }
       break;
     }
+    case "change-overlap": {
+      STATE.detect.overlap = args.overlap;
+      predictWorkers.forEach((worker) => {
+        worker.postMessage({
+          message: "change-overlap",
+          overlap: STATE.detect.overlap,
+        });
+      });
+      break;
+    }
+    cas
     case "change-mode": {
       const mode = args.mode;
       INITIALISED = await onChangeMode(mode);
@@ -2883,6 +2894,7 @@ function spawnPredictWorkers(model, batchSize, threads) {
       message: "load",
       model: model,
       batchSize: batchSize,
+      overlap: STATE.detect.overlap,
       backend: STATE.detect.backend,
       worker: i,
     });
@@ -2897,7 +2909,7 @@ function spawnPredictWorkers(model, batchSize, threads) {
     worker.onerror = (e) => {
       console.warn(
         `Worker ${i} is suffering, shutting it down. THe error was:`,
-        e.message
+        e
       );
       predictWorkers.splice(i, 1);
       worker.terminate();

@@ -1926,6 +1926,7 @@ window.onload = async () => {
       limit, locale, speciesThreshold, list, useWeek, UUID, 
       local, debug, fileStartMtime, specDetections } = config;
 
+    
     worker.postMessage({
       action: "update-state",
       model,
@@ -2066,7 +2067,7 @@ window.onload = async () => {
     document.getElementById("auto-load").checked = autoLoad;
     document.getElementById("iucn").checked = iucn;
     document.getElementById("iucn-scope").selected = iucnScope;
-    document.getElementById("overlap").value = overlap;
+    DOM.overlapSlider.value = overlap;
     document.getElementById("overlap-value").textContent = overlap;
     // document.getElementById("sensitivity").value = sensitivity;
     // document.getElementById("sensitivity-value").textContent = sensitivity;
@@ -3107,6 +3108,7 @@ function disableSettingsDuringAnalysis(bool) {
     "modelToUse",
     "threadSlider",
     "batchSizeSlider",
+    "overlapSlider",
     "locale",
     "listToUse",
     "customListContainer",
@@ -5702,8 +5704,8 @@ document.addEventListener("change", async function (e) {
         case "overlap":{
           config.detect.overlap = element.valueAsNumber;
           worker.postMessage({
-            action: "update-state",
-            detect: config.detect,
+            action: "change-overlap",
+            overlap: config.detect.overlap,
           });
           break;
         }
