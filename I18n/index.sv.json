@@ -22,6 +22,8 @@
     "Low Shelf Filter-circle-help": ["När använt, dämpar lågfrekvent brus under gränsfrekvensen."],
     "Model-circle-help": ["Välj om du vill använda Nocmig-modellen, optimerad för nattliga migrationsanrop i Europa, eller BirdNET, som kan detektera över 6000 arter över hela världen."],
     "Nocmig Mode-circle-help": ["När aktiverat, söker detta 'Nocmig-läge' endast efter och visar endast detekteringar som hittas under natten."],
+    "Overlap-circle-help": ["Bestämmer antalet sekunders överlappning mellan efterföljande analysfönster. Obs! Icke-nollvärden kommer att producera dubbletter och öka antalet falska positiva."],
+    "Sensitivity-circle-help": ["Justerar fördelningen av förutsägelsespoäng. Värden större än 1 ökar tilliten till resultat med hög säkerhet och minskar tilliten till resultat med låg säkerhet. Värden mindre än 1 gör motsatsen."],
     "Auto-load-circle-help": ["När aktiverat visas sparade detektioner omedelbart vid öppning av en fil."],
     "Normalise-circle-help": ["När aktiverat, kommer ljudet du hör att normaliseras, vilket utökar det dynamiska omfånget."],
     "Prevent system sleep-circle-help": ["När aktiverat, förhindrar att systemet går i viloläge medan Chirpity används."],
@@ -102,6 +104,8 @@
     "database-location-select": ["Databasplats:"],
     "close-tour": ["Stäng"],
     "settings": {
+        "overlap": "Överlappning:",
+        "sensitivity": "Känslighet:",
         "basic": "Standard",
         "advanced": "Expert",
         "show-species": ["Visa de inkluderade arterna"],
