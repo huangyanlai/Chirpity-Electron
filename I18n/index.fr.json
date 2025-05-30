@@ -22,6 +22,8 @@
     "Low Shelf Filter-circle-help": ["Lorsqu'il est utilisé, atténue le bruit de basse fréquence en dessous de la fréquence de coupure."],
     "Model-circle-help": ["Sélectionnez si vous souhaitez utiliser le modèle Nocmig, optimisé pour les cris de migration nocturne en Europe, ou BirdNET, qui peut détecter plus de 6000 espèces dans le monde entier."],
     "Nocmig Mode-circle-help": ["Lorsqu'il est activé, ce mode 'Nocmig' ne recherche et n'affiche que les détections trouvées pendant la nuit."],
+    "Overlap-circle-help": ["Détermine le nombre de secondes de chevauchement entre les fenêtres d’analyse successives. Remarque : des valeurs non nulles produiront des résultats en double et augmenteront les faux positifs."],
+    "Sensitivity-circle-help": ["Ajuste la distribution des scores de prédiction. Les valeurs supérieures à 1 augmentent la confiance dans les résultats très probables et la diminuent pour les résultats peu probables. Les valeurs inférieures à 1 font l’inverse."],
     "Auto-load-circle-help": ["Lorsqu'il est activé, les détections enregistrées s'affichent immédiatement à l'ouverture d'un fichier."],
     "Normalise-circle-help": ["Lorsqu'il est activé, l'audio que vous entendez sera normalisé, étendant ainsi la plage dynamique."],
     "Prevent system sleep-circle-help": ["Lorsqu'il est activé, empêche le système de se suspendre pendant que Chirpity est en cours d'utilisation."],
@@ -102,6 +104,8 @@
     "database-location-select": ["Emplacement de la base de données:"],
     "close-tour": ["Fermer"],
     "settings": {
+      "overlap": "Chevauchement:",
+      "sensitivity": "Sensibilité:",
       "basic": "Standard",
       "advanced": "Expert",
       "show-species": ["Afficher les espèces incluses"],

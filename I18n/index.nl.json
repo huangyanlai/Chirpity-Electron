@@ -23,6 +23,8 @@
     "Model-circle-help": ["Kies of je het Nocmig-model wilt gebruiken, geoptimaliseerd voor nachtelijke migratieoproepen in Europa, of BirdNET, dat meer dan 6000 soorten wereldwijd kan detecteren."],
     "Nocmig Mode-circle-help": ["Wanneer ingeschakeld, zoekt deze 'Nocmig-modus' alleen naar en toont alleen detecties die 's nachts zijn gevonden."],
     "Auto-load-circle-help": ["Wanneer ingeschakeld, worden opgeslagen detecties direct weergegeven bij het openen van een bestand."],
+    "Overlap-circle-help": ["Bepaalt het aantal seconden overlap tussen opeenvolgende analysevensters. Let op: Niet-nulwaarden veroorzaken dubbele resultaten en verhogen het aantal vals-positieven."],
+    "Sensitivity-circle-help": ["Past de verdeling van voorspellingsscores aan. Waarden groter dan 1 verhogen het vertrouwen in resultaten met hoge zekerheid en verlagen het vertrouwen in resultaten met lage zekerheid. Waarden kleiner dan 1 doen het tegenovergestelde."],
     "Normalise-circle-help": ["Wanneer ingeschakeld, wordt het audio dat je hoort genormaliseerd, waardoor het dynamische bereik wordt vergroot."],
     "Prevent system sleep-circle-help": ["Wanneer ingeschakeld, voorkomt dit dat het systeem in slaapstand gaat terwijl Chirpity in gebruik is."],
     "Send Filtered Audio-circle-help": ["Het verzenden van High Pass- of Low Shelf-gefilterde audio naar een model heeft meestal een negatieve invloed op de nauwkeurigheid. Gebruik deze optie met voorzichtigheid!"],
@@ -102,6 +104,8 @@
     "database-location-select": ["Database locatie:"],
     "close-tour": ["Sluiten"],
     "settings": {
+        "overlap": "Overlapping:",
+        "sensitivity": "Gevoeligheid:",
         "basic": "Standaard",
         "advanced": "Expert",
         "show-species": ["Toon de opgenomen soorten"],

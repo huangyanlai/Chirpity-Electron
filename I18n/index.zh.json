@@ -22,6 +22,8 @@
   "Low Shelf Filter-circle-help": ["启用后，将削弱低于截止频率的低频噪音。"],
   "Model-circle-help": ["选择使用为欧洲夜间迁徙鸣声优化的 Nocmig 模型，或 BirdNET，它可以检测全球超过 6000 种物种。"],
   "Nocmig Mode-circle-help": ["启用后，此‘Nocmig 模式’仅搜索并显示在夜间找到的检测结果。"],
+  "Overlap-circle-help": ["决定连续分析窗口之间的重叠时间（秒）。注意：非零值将产生重复结果，并增加误报的概率。"],
+  "Sensitivity-circle-help": ["调整预测分数的分布。大于 1 的值会提高高置信结果的置信度，同时降低低置信结果的置信度。小于 1 的值则相反。"],
   "Auto-load-circle-help": ["启用后，打开文件时将立即显示已保存的检测结果。"],
   "Normalise-circle-help": ["启用后，您听到的音频将被标准化，扩展动态范围。"],
   "Prevent system sleep-circle-help": ["启用后，在使用 Chirpity 时防止系统进入睡眠状态。"],
@@ -102,6 +104,8 @@
   "database-location-select": ["数据库位置:"],
   "close-tour": ["关闭"],
   "settings": {
+    "overlap": "重叠：",
+    "sensitivity": "灵敏度：",
     "basic": "标准",
     "advanced": "专家",
     "show-species": ["显示包含的物种"],
